@@ -2,7 +2,7 @@ import type { BrowserContext } from 'patchright'
 
 import type { MicrosoftRewardsBot } from '../index'
 
-const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media'])
+const BLOCKED_RESOURCE_TYPES = new Set(['image', 'media', 'font'])
 
 export async function configureMediaBlocking(bot: MicrosoftRewardsBot, context: BrowserContext): Promise<void> {
     if (!bot.config.experimental.blockMedia) return
@@ -19,6 +19,6 @@ export async function configureMediaBlocking(bot: MicrosoftRewardsBot, context: 
     bot.logger.info(
         bot.isMobile,
         'BROWSER',
-        'Media loading disabled | blockedResourceTypes=image,media | httpCache=disabled-by-routing'
+        'Media loading disabled | blockedResourceTypes=image,media,font | httpCache=disabled-by-routing'
     )
 }
