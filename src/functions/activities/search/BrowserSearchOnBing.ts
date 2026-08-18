@@ -74,7 +74,16 @@ export class SearchOnBing extends BaseActivity {
         )
 
         await this.bot.browser.func.synchronizeActiveBrowserCookies('SEARCH-ON-BING-COOKIE-SEED', true)
-        await this.ensureSearchReady(page)
+
+        const searchReady = await this.ensureSearchReady(page)
+        if (!searchReady) {
+            this.bot.logger.warn(
+                this.bot.isMobile,
+                'SEARCH-ON-BING-SEARCH',
+                `Skipping incompatible SearchOnBing offer: Bing interactive search box unavailable | offerId=${offerId} | title="${promotion.title}" | currentUrl=${page.url()}`
+            )
+            return
+        }
 
         let lastBalance = this.oldBalance
         let i = 0
@@ -84,7 +93,15 @@ export class SearchOnBing extends BaseActivity {
                 this.bot.logger.debug(this.bot.isMobile, 'SEARCH-ON-BING-SEARCH', `Processing query | query="${query}"`)
 
                 await this.bot.browser.func.synchronizeActiveBrowserCookies('SEARCH-ON-BING-COOKIE-SEED', true)
-                await this.typeSearch(page, query)
+                const searched = await this.typeSearch(page, query)
+                if (!searched) {
+                    this.bot.logger.warn(
+                        this.bot.isMobile,
+                        'SEARCH-ON-BING-SEARCH',
+                        `Stopping SearchOnBing offer because the interactive search box became unavailable | offerId=${offerId} | title="${promotion.title}" | query="${query}" | currentUrl=${page.url()}`
+                    )
+                    return
+                }
 
                 await this.bot.utils.wait(this.bot.utils.randomDelay(5000, 7000))
 
@@ -147,32 +164,19 @@ export class SearchOnBing extends BaseActivity {
     }
 
     private async ensureSearchReady(page: Page): Promise<boolean> {
-        const searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
+        let searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
         if (await searchBox.isVisible().catch(() => false)) return true
 
         await page.goto(URLs.bing.origin, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
         await this.bot.browser.utils.tryDismissAllMessages(page)
 
+        searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
         return await searchBox.isVisible().catch(() => false)
     }
 
-    private async navigateSearchFallback(page: Page, query: string): Promise<void> {
-        const searchUrl = `${URLs.bing.origin}/search?q=${encodeURIComponent(query)}`
-        this.bot.logger.warn(
-            this.bot.isMobile,
-            'SEARCH-ON-BING-SEARCH',
-            `Bing search box unavailable; using search URL fallback | currentUrl=${page.url()}`
-        )
-
-        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
-    }
-
-    private async typeSearch(page: Page, query: string) {
+    private async typeSearch(page: Page, query: string): Promise<boolean> {
         const searchReady = await this.ensureSearchReady(page)
-        if (!searchReady) {
-            await this.navigateSearchFallback(page, query)
-            return
-        }
+        if (!searchReady) return false
 
         const searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
 
@@ -183,13 +187,14 @@ export class SearchOnBing extends BaseActivity {
             await searchBox.fill(query)
             await searchBox.press('Enter')
             await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
+            return true
         } catch (error) {
             this.bot.logger.warn(
                 this.bot.isMobile,
                 'SEARCH-ON-BING-SEARCH',
-                `Search box interaction failed; using URL fallback | message=${error instanceof Error ? error.message : String(error)}`
+                `Search box interaction failed; skipping this SearchOnBing offer | message=${error instanceof Error ? error.message : String(error)}`
             )
-            await this.navigateSearchFallback(page, query)
+            return false
         }
     }
 }
