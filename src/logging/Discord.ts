@@ -46,6 +46,17 @@ interface ResolvedDiscordSettings {
     respectWebhookFilter: boolean
 }
 
+interface RunTotals {
+    urlActivities: number
+    appRewards: number
+    readToEarn: number
+    punchcards: number
+    checkIn: number
+    bonus: number
+    skippedOffers: number
+    errors: number
+}
+
 const discordQueue = new PQueue({
     concurrency: 1,
     interval: 1000,
@@ -54,6 +65,21 @@ const discordQueue = new PQueue({
 })
 
 const recentNotifications = new Map<string, number>()
+
+function emptyRunTotals(): RunTotals {
+    return {
+        urlActivities: 0,
+        appRewards: 0,
+        readToEarn: 0,
+        punchcards: 0,
+        checkIn: 0,
+        bonus: 0,
+        skippedOffers: 0,
+        errors: 0
+    }
+}
+
+let runTotals = emptyRunTotals()
 
 function truncate(text: string, limit = EMBED_DESCRIPTION_LIMIT) {
     return text.length <= limit ? text : text.slice(0, Math.max(0, limit - 14)) + ' …(truncated)'
@@ -153,6 +179,11 @@ function metric(message: string, key: string): string | undefined {
     return match?.[1]?.trim()
 }
 
+function numberMetric(message: string, key: string): number {
+    const value = Number(metric(message, key))
+    return Number.isFinite(value) ? value : 0
+}
+
 function colonMetric(message: string, key: string): string | undefined {
     const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const match = message.match(new RegExp(`(?:^|\\|)\\s*${escaped}:\\s*([^|]+)`, 'i'))
@@ -207,6 +238,64 @@ function resolveSettings(config: WebhookDiscordConfig): ResolvedDiscordSettings 
             config.respectWebhookFilter ?? false
         )
     }
+}
+
+function trackRun(parsed: ParsedLog | null, fallbackLevel: LogLevel): void {
+    if (!parsed) return
+
+    if (parsed.event === 'RUN-START') {
+        runTotals = emptyRunTotals()
+        return
+    }
+
+    if (parsed.level === 'error' || fallbackLevel === 'error') runTotals.errors += 1
+
+    switch (parsed.event) {
+        case 'URL-REWARD':
+            if (parsed.message.startsWith('Completed')) runTotals.urlActivities += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'APP-REWARD':
+            if (parsed.message.startsWith('Completed')) runTotals.appRewards += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'READ-TO-EARN':
+            if (parsed.message.startsWith('Completed')) runTotals.readToEarn += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'PUNCHCARD':
+            if (/\bCOMPLETE\b/.test(parsed.message)) runTotals.punchcards += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'DAILY-CHECK-IN':
+            if (parsed.message.startsWith('Completed')) runTotals.checkIn += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'CLAIM-BONUS-POINTS':
+            if (parsed.message.startsWith('Completed')) runTotals.bonus += numberMetric(parsed.message, 'pointsGained')
+            break
+        case 'SEARCH-ON-BING-SEARCH':
+            if (parsed.message.includes('Skipping incompatible SearchOnBing offer')) runTotals.skippedOffers += 1
+            break
+        default:
+            break
+    }
+}
+
+function earningsBreakdown(totalPoints: number): string {
+    const known =
+        runTotals.urlActivities +
+        runTotals.appRewards +
+        runTotals.readToEarn +
+        runTotals.punchcards +
+        runTotals.checkIn +
+        runTotals.bonus
+    const other = Math.max(0, totalPoints - known)
+
+    return [
+        `URL activities: **${runTotals.urlActivities}**`,
+        `App rewards: **${runTotals.appRewards}**`,
+        `Read to Earn: **${runTotals.readToEarn}**`,
+        `Punchcards: **${runTotals.punchcards}**`,
+        `Daily check-in: **${runTotals.checkIn}**`,
+        `Bonus claims: **${runTotals.bonus}**`,
+        `Other / unclassified: **${other}**`
+    ].join('\n')
 }
 
 function isStandardMilestone(parsed: ParsedLog): boolean {
@@ -446,7 +535,13 @@ function buildEmbed(
             addField(fields, 'Current balance', metric(cleanMessage, 'currentBalance'))
             const runtime = metric(cleanMessage, 'runtimeMinutes')
             addField(fields, 'Runtime', runtime ? `${runtime} min` : undefined)
-            description = 'All configured accounts finished successfully.'
+            const totalPoints = numberMetric(cleanMessage, 'pointsGained')
+            addField(fields, 'Earning breakdown', earningsBreakdown(totalPoints), false)
+            addField(fields, 'Skipped incompatible offers', String(runTotals.skippedOffers))
+            addField(fields, 'Errors seen', String(runTotals.errors))
+            description = runTotals.errors > 0
+                ? 'Run completed, but one or more errors were observed. Review the error cards above.'
+                : 'All configured accounts finished successfully.'
             break
         }
         case 'SEARCH-ON-BING-SEARCH': {
@@ -529,6 +624,7 @@ export async function sendDiscord(
 
     const settings = resolveSettings(config)
     const parsed = parseLog(content, level)
+    trackRun(parsed, level)
     if (!shouldSend(parsed, level, settings, webhookAllowed)) return
 
     const notificationKey = makeNotificationKey(parsed, content, level)
