@@ -6,6 +6,7 @@ import { URLs } from '../../../constants/urls'
 import type { BasePromotion } from '../../../interface/DashboardData'
 
 const SEARCH_BOX_SELECTOR = '#sb_form_q, input[name="q"], textarea[name="q"], [role="searchbox"]'
+// Keep SearchOnBing on the interactive-search path; incompatible pages are skipped instead of URL-fallback loops.
 
 export class SearchOnBing extends BaseActivity {
     private gainedPoints = 0
