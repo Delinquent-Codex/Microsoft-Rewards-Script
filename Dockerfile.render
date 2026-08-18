@@ -101,6 +101,21 @@ COPY --chmod=644 src/crontab.template /etc/cron.d/microsoft-rewards-cron.templat
 COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ###############################################################################
+# Render runtime directories
+#
+# Docker Compose normally creates these through bind mounts. Render Free does
+# not mount those volumes, so create the directories inside the image.
+###############################################################################
+RUN mkdir -p \
+    /usr/src/microsoft-rewards-script/config \
+    /usr/src/microsoft-rewards-script/sessions \
+    /usr/src/microsoft-rewards-script/diagnostics \
+    && chmod 700 \
+    /usr/src/microsoft-rewards-script/config \
+    /usr/src/microsoft-rewards-script/sessions \
+    /usr/src/microsoft-rewards-script/diagnostics
+
+###############################################################################
 # Render Free + UptimeRobot Free compatibility
 #
 # Upstream protects every endpoint, including /health, whenever API_TOKEN is
