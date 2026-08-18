@@ -127,7 +127,8 @@ class Browser {
                 : account.saveFingerprint.desktop
 
             const savedFingerprint = shouldUseFingerprint ? session?.fingerprint : null
-            const reuseFingerprint = savedFingerprint && fingerprintMatchesLocale(savedFingerprint, this.bot.accountLocale)
+            const reuseFingerprint =
+                savedFingerprint && fingerprintMatchesLocale(savedFingerprint, this.bot.accountLocale)
 
             if (savedFingerprint && !reuseFingerprint) {
                 this.bot.logger.info(
@@ -137,7 +138,8 @@ class Browser {
                 )
             }
 
-            const fingerprint = (reuseFingerprint && savedFingerprint) || (await this.generateFingerprint(this.bot.isMobile))
+            const fingerprint =
+                (reuseFingerprint && savedFingerprint) || (await this.generateFingerprint(this.bot.isMobile))
 
             const screen = fingerprint.fingerprint.screen
 
