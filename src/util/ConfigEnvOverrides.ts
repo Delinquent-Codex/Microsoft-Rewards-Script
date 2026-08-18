@@ -89,6 +89,13 @@ export const ENV_OVERRIDES: EnvOverrideEntry[] = [
     // Discord webhook
     { env: 'CONFIG_DISCORD_ENABLED', path: 'webhook.discord.enabled', type: 'bool' },
     { env: 'CONFIG_DISCORD_URL', path: 'webhook.discord.url', type: 'string' },
+    { env: 'CONFIG_DISCORD_MODE', path: 'webhook.discord.mode', type: 'string' },
+    { env: 'CONFIG_DISCORD_USERNAME', path: 'webhook.discord.username', type: 'string' },
+    { env: 'CONFIG_DISCORD_AVATAR_URL', path: 'webhook.discord.avatarUrl', type: 'string' },
+    { env: 'CONFIG_DISCORD_DASHBOARD_URL', path: 'webhook.discord.dashboardUrl', type: 'string' },
+    { env: 'CONFIG_DISCORD_MASK_ACCOUNT', path: 'webhook.discord.maskAccount', type: 'bool' },
+    { env: 'CONFIG_DISCORD_INCLUDE_WARNINGS', path: 'webhook.discord.includeWarnings', type: 'bool' },
+    { env: 'CONFIG_DISCORD_RESPECT_WEBHOOK_FILTER', path: 'webhook.discord.respectWebhookFilter', type: 'bool' },
 
     // Telegram webhook
     { env: 'CONFIG_TELEGRAM_ENABLED', path: 'webhook.telegram.enabled', type: 'bool' },
