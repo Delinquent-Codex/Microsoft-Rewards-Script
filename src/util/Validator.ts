@@ -73,14 +73,21 @@ const AccountCountrySchema = z
         'Expected "auto" or a two-letter country code'
     )
 
+const WebhookDiscordSchema = z.object({
+    enabled: z.boolean(),
+    url: z.string(),
+    mode: z.enum(['summary', 'standard', 'verbose']).optional(),
+    username: z.string().max(80).optional(),
+    avatarUrl: z.string().optional(),
+    dashboardUrl: z.string().optional(),
+    maskAccount: z.boolean().optional(),
+    includeWarnings: z.boolean().optional(),
+    respectWebhookFilter: z.boolean().optional()
+})
+
 // Webhook
 const WebhookSchema = z.object({
-    discord: z
-        .object({
-            enabled: z.boolean(),
-            url: z.string()
-        })
-        .optional(),
+    discord: WebhookDiscordSchema.optional(),
     ntfy: z
         .object({
             enabled: z.boolean().optional(),
