@@ -146,16 +146,16 @@ function buildEmbed(content: string, level: LogLevel): DiscordEmbed {
     switch (parsed.event) {
         case 'RUN-START': {
             title = '🚀 Rewards Run Started'
-            addField(fields, 'Version', metric(parsed.message, 'v') ?? parsed.message.match(/\|\s*(v\d+(?:\.\d+)*)\s*\|/)?.[1])
-            addField(fields, 'Accounts', metric(parsed.message, 'Accounts'))
-            addField(fields, 'Clusters', metric(parsed.message, 'Clusters'))
+            addField(fields, 'Version', parsed.message.match(/\|\s*(v\d+(?:\.\d+)*)\s*\|/)?.[1])
+            addField(fields, 'Accounts', colonMetric(parsed.message, 'Accounts'))
+            addField(fields, 'Clusters', colonMetric(parsed.message, 'Clusters'))
             description = 'Microsoft Rewards automation has started.'
             break
         }
         case 'ACCOUNT-START': {
             title = '👤 Account Started'
-            addField(fields, 'Locale', metric(parsed.message, 'locale'))
-            addField(fields, 'Geo', metric(parsed.message, 'geoLocale'))
+            addField(fields, 'Locale', colonMetric(parsed.message, 'locale'))
+            addField(fields, 'Geo', colonMetric(parsed.message, 'geoLocale'))
             description = 'Processing this Microsoft Rewards account.'
             break
         }
