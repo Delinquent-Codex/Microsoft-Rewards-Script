@@ -33,12 +33,19 @@ class Browser {
         '--disable-web-authentication-ui',
         '--disable-external-intent-requests',
         '--disable-blink-features=AutomationControlled',
-        '--disable-features=WebAuthentication,PasswordManagerOnboarding,PasswordManager,EnablePasswordsAccountStorage,Passkeys,WebAuthenticationProxy,U2F',
+        '--disable-features=WebAuthentication,PasswordManagerOnboarding,PasswordManager,EnablePasswordsAccountStorage,Passkeys,WebAuthenticationProxy,U2F,BackForwardCache,MediaRouter,OptimizationHints,InterestFeedContentSuggestions',
         '--disable-save-password-bubble',
         '--disable-dev-shm-usage',
         '--disable-background-networking',
         '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
+        '--disable-renderer-backgrounding',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--no-service-autorun',
+        '--renderer-process-limit=1'
     ] as const
 
     constructor(bot: MicrosoftRewardsBot) {
@@ -83,7 +90,7 @@ class Browser {
             this.bot.logger.info(
                 this.bot.isMobile,
                 'BROWSER',
-                `Launching bundled patched Chromium (Edge UA) | headless=${headless} | platform=${process.platform} | proxy=${hasProxy ? 'yes' : 'no'} | tls=${ignoreCertificateErrors ? 'verification-disabled' : 'verified'} | sandbox=${sandboxDisabled ? 'disabled-root' : 'enabled'}`
+                `Launching bundled patched Chromium (Edge UA) | headless=${headless} | platform=${process.platform} | proxy=${hasProxy ? 'yes' : 'no'} | tls=${ignoreCertificateErrors ? 'verification-disabled' : 'verified'} | sandbox=${sandboxDisabled ? 'disabled-root' : 'enabled'} | rendererProcessLimit=1 | backForwardCache=disabled`
             )
 
             browser = await rebrowser.chromium.launch({
@@ -120,8 +127,7 @@ class Browser {
                 : account.saveFingerprint.desktop
 
             const savedFingerprint = shouldUseFingerprint ? session?.fingerprint : null
-            const reuseFingerprint =
-                savedFingerprint && fingerprintMatchesLocale(savedFingerprint, this.bot.accountLocale)
+            const reuseFingerprint = savedFingerprint && fingerprintMatchesLocale(savedFingerprint, this.bot.accountLocale)
 
             if (savedFingerprint && !reuseFingerprint) {
                 this.bot.logger.info(
@@ -131,8 +137,7 @@ class Browser {
                 )
             }
 
-            const fingerprint =
-                (reuseFingerprint && savedFingerprint) || (await this.generateFingerprint(this.bot.isMobile))
+            const fingerprint = (reuseFingerprint && savedFingerprint) || (await this.generateFingerprint(this.bot.isMobile))
 
             const screen = fingerprint.fingerprint.screen
 
