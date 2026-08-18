@@ -81,7 +81,14 @@
     "webhook": {
         "discord": {
             "enabled": false,
-            "url": ""
+            "url": "",
+            "mode": "standard",
+            "username": "Microsoft Rewards",
+            "avatarUrl": "",
+            "dashboardUrl": "",
+            "maskAccount": true,
+            "includeWarnings": false,
+            "respectWebhookFilter": false
         },
         "telegram": {
             "enabled": false,
