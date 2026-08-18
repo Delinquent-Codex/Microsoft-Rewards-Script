@@ -1,14 +1,11 @@
 name: Code Quality
 
 on:
-    push:
-        branches: ['v4']
     pull_request:
         branches: ['v4']
-    workflow_dispatch:
 
 concurrency:
-    group: code-quality-${{ github.ref }}
+    group: code-quality-bootstrap-fix
     cancel-in-progress: true
 
 permissions:
@@ -21,9 +18,10 @@ jobs:
         timeout-minutes: 15
 
         steps:
-            - name: Check out repository
+            - name: Check out production v4
               uses: actions/checkout@v4
               with:
+                  ref: v4
                   fetch-depth: 2
 
             - name: Set up Node.js 24
@@ -188,7 +186,7 @@ jobs:
                   )
                   PY
 
-                  # Restore the normal quality workflow in the same source-fix commit.
+                  # Restore the permanent workflow from the parent commit in the same source-fix commit.
                   git show HEAD^:.github/workflows/code-quality.yml > .github/workflows/code-quality.yml
 
             - name: Install dependencies
@@ -206,15 +204,11 @@ jobs:
             - name: Log parser tests
               run: npm run test:log-parser
 
-            - name: Commit verified fixes
+            - name: Commit verified fixes to v4
               shell: bash
               run: |
                   git config user.name 'github-actions[bot]'
                   git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
                   git add -A
-                  if git diff --cached --quiet; then
-                    echo 'No patch changes to commit.'
-                    exit 0
-                  fi
                   git commit -m 'Fix Rewards bootstrap navigation races and failure exits'
                   git push origin HEAD:v4
