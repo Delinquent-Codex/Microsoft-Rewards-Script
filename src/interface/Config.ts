@@ -92,9 +92,18 @@ export interface LogFilter {
     regexPatterns?: string[]
 }
 
+export type DiscordNotificationMode = 'summary' | 'standard' | 'verbose'
+
 export interface WebhookDiscordConfig {
     enabled: boolean
     url: string
+    mode?: DiscordNotificationMode
+    username?: string
+    avatarUrl?: string
+    dashboardUrl?: string
+    maskAccount?: boolean
+    includeWarnings?: boolean
+    respectWebhookFilter?: boolean
 }
 
 export interface WebhookNtfyConfig {
