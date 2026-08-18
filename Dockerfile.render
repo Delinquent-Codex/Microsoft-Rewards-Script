@@ -1,0 +1,123 @@
+###############################################################################
+# Stage 1: Builder
+###############################################################################
+FROM node:24-slim AS builder
+
+WORKDIR /usr/src/microsoft-rewards-script
+
+ENV PLAYWRIGHT_BROWSERS_PATH=0
+
+# Copy package files
+COPY package.json package-lock.json tsconfig.json ./
+
+# Install all dependencies required to build the script
+RUN npm ci --ignore-scripts
+
+# Copy source and build
+COPY . .
+RUN npm run build
+
+# Remove build dependencies, and reinstall only runtime dependencies
+RUN rm -rf node_modules \
+    && npm ci --omit=dev --ignore-scripts \
+    && npm cache clean --force
+
+###############################################################################
+# Stage 2: Runtime
+###############################################################################
+FROM node:24-slim AS runtime
+
+WORKDIR /usr/src/microsoft-rewards-script
+
+# Set production environment variables
+ENV NODE_ENV=production \
+    TZ=UTC \
+    PLAYWRIGHT_BROWSERS_PATH=0 \
+    FORCE_HEADLESS=1 \
+    NODE_OPTIONS=--disable-warning=ExperimentalWarning
+
+# Install minimal system libraries required for Chromium headless to run,
+# plus jq (for config generation/patching) and gettext-base (for envsubst)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cron \
+    gettext-base \
+    jq \
+    tzdata \
+    ca-certificates \
+    libglib2.0-0 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libasound2 \
+    libflac12 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libdav1d6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    libdouble-conversion3 \
+    fonts-liberation \
+    fonts-noto-core \
+    fonts-noto-color-emoji \
+    fonts-freefont-ttf \
+    fonts-droid-fallback \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Copy compiled application and dependencies from builder stage
+COPY --from=builder /usr/src/microsoft-rewards-script/dist ./dist
+COPY --from=builder /usr/src/microsoft-rewards-script/package*.json ./
+COPY --from=builder /usr/src/microsoft-rewards-script/node_modules ./node_modules
+
+# Install Patchright's bundled Chromium headless shell
+RUN set -eux; \
+    npx patchright install --with-deps --only-shell chromium; \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Config template
+COPY config.example.json ./config.example.json
+
+# Runtime scripts
+COPY --chmod=755 scripts/docker/run_daily.sh ./scripts/docker/run_daily.sh
+COPY --chmod=755 scripts/docker/healthcheck.sh ./scripts/docker/healthcheck.sh
+COPY --chmod=755 scripts/api/ ./scripts/api/
+COPY --chmod=644 scripts/env.js ./scripts/env.js
+COPY --chmod=644 scripts/package.json ./scripts/package.json
+COPY --chmod=644 src/crontab.template /etc/cron.d/microsoft-rewards-cron.template
+COPY --chmod=755 scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+###############################################################################
+# Render Free + UptimeRobot Free compatibility
+#
+# Upstream protects every endpoint, including /health, whenever API_TOKEN is
+# configured. UptimeRobot Free does not support the custom Authorization header
+# we would need.
+#
+# Make ONLY GET /health public. Every control/read/write endpoint remains
+# behind API_TOKEN.
+#
+# grep makes this fail closed: if upstream changes the auth implementation,
+# the image build fails instead of silently deploying an unexpected policy.
+###############################################################################
+RUN sed -i \
+    "s|    if (TOKEN && !isAuthorized(req, url)) {|    const isPublicHealth = method === 'GET' \&\& pathname === '/health'\n    if (!isPublicHealth \&\& TOKEN \&\& !isAuthorized(req, url)) {|" \
+    ./scripts/api/server.js \
+    && grep -Fq "const isPublicHealth = method === 'GET' && pathname === '/health'" ./scripts/api/server.js
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+CMD ["sh", "-c", "echo 'Container started; cron is running.'"]
