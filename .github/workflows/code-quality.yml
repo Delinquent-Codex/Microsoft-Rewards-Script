@@ -22,7 +22,7 @@ jobs:
               uses: actions/checkout@v4
               with:
                   ref: v4
-                  fetch-depth: 2
+                  fetch-depth: 5
 
             - name: Set up Node.js 24
               uses: actions/setup-node@v4
@@ -35,6 +35,7 @@ jobs:
               run: |
                   python3 <<'PY'
                   from pathlib import Path
+                  import re
 
                   def replace_once(path: str, old: str, new: str) -> None:
                       file = Path(path)
@@ -43,6 +44,14 @@ jobs:
                       if count != 1:
                           raise SystemExit(f'{path}: expected exactly one target, found {count}')
                       file.write_text(text.replace(old, new, 1))
+
+                  def regex_once(path: str, pattern: str, replacement: str) -> None:
+                      file = Path(path)
+                      text = file.read_text()
+                      updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE | re.DOTALL)
+                      if count != 1:
+                          raise SystemExit(f'{path}: expected exactly one regex target, found {count}')
+                      file.write_text(updated)
 
                   browser_func = 'src/browser/BrowserFunc.ts'
                   replace_once(
@@ -146,49 +155,24 @@ jobs:
                   )
 
                   index_file = 'src/index.ts'
-                  replace_once(
+                  regex_once(
                       index_file,
-                      """                const stats = await this.runTasks(chunk, runStartTime ?? runStartTimeFromMaster ?? Date.now())
-
-                                      if (process.send) {
-                  """,
-                      """                const stats = await this.runTasks(chunk, runStartTime ?? runStartTimeFromMaster ?? Date.now())
-                                      const hadAccountFailure = stats.some(stat => !stat.success)
-
-                                      if (process.send) {
-                  """
+                      r"(const stats = await this\.runTasks\(chunk,\s*runStartTime \?\? runStartTimeFromMaster \?\? Date\.now\(\)\)\s*)(if \(process\.send\) \{)",
+                      r"\1const hadAccountFailure = stats.some(stat => !stat.success)\n\n                \2"
                   )
-
-                  replace_once(
+                  regex_once(
                       index_file,
-                      """                await flushAllWebhooks()
-                                      process.exit(0)
-                                  } catch (error) {
-                  """,
-                      """                await flushAllWebhooks()
-                                      process.exit(hadAccountFailure ? 1 : 0)
-                                  } catch (error) {
-                  """
+                      r"(const hadAccountFailure = stats\.some\(stat => !stat\.success\)[\s\S]*?await flushAllWebhooks\(\)\s*)process\.exit\(0\)(\s*\} catch \(error\) \{)",
+                      r"\1process.exit(hadAccountFailure ? 1 : 0)\2"
                   )
-
-                  replace_once(
+                  regex_once(
                       index_file,
-                      """            await flushAllWebhooks()
-                              process.exit(0)
-                          }
-
-                          return accountStats
-                  """,
-                      """            await flushAllWebhooks()
-                              process.exit(accountStats.some(stat => !stat.success) ? 1 : 0)
-                          }
-
-                          return accountStats
-                  """
+                      r"(if \(this\.config\.clusters <= 1 && cluster\.isPrimary\) \{[\s\S]*?await flushAllWebhooks\(\)\s*)process\.exit\(0\)",
+                      r"\1process.exit(accountStats.some(stat => !stat.success) ? 1 : 0)"
                   )
                   PY
 
-                  git show HEAD^:.github/workflows/code-quality.yml > .github/workflows/code-quality.yml
+                  git show 37e72cfe878d7f2e2fb55c55b6dbc6654f6fb1ab:.github/workflows/code-quality.yml > .github/workflows/code-quality.yml
 
             - name: Install dependencies
               run: npm ci --ignore-scripts
