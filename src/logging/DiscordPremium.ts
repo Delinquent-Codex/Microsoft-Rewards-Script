@@ -7,9 +7,13 @@ import { flushQueue } from './Queue'
 
 const EMBED_DESCRIPTION_LIMIT = 3900
 const EMBED_FIELD_LIMIT = 1000
+const EMBED_TOTAL_LIMIT = 5900
 const DEDUPE_WINDOW_MS = 30_000
+const TRACK_DEDUPE_WINDOW_MS = 5_000
 const MAX_RECENT_NOTIFICATIONS = 100
+const MAX_RECENT_TRACKED = 250
 const MAX_SEND_ATTEMPTS = 3
+const MAX_RETRY_DELAY_MS = 15_000
 
 interface ParsedLog {
     timestamp: string
@@ -61,8 +65,6 @@ interface RunTotals {
     errors: number
     accountsCompleted: number
     version?: string
-    accountsPlanned?: number
-    clusters?: number
 }
 
 const COLORS = {
@@ -72,8 +74,7 @@ const COLORS = {
     error: 0xed4245,
     points: 0xf1c40f,
     search: 0x3498db,
-    activity: 0x9b59b6,
-    neutral: 0x95a5a6
+    activity: 0x9b59b6
 } as const
 
 const discordQueue = new PQueue({
@@ -84,6 +85,8 @@ const discordQueue = new PQueue({
 })
 
 const recentNotifications = new Map<string, number>()
+const recentTrackedEvents = new Map<string, number>()
+const skippedOfferIds = new Set<string>()
 
 function emptyRunTotals(): RunTotals {
     return {
@@ -104,7 +107,9 @@ function emptyRunTotals(): RunTotals {
 let runTotals = emptyRunTotals()
 
 function truncate(text: string, limit = EMBED_DESCRIPTION_LIMIT): string {
-    return text.length <= limit ? text : `${text.slice(0, Math.max(0, limit - 14))} …(truncated)`
+    if (text.length <= limit) return text
+    const suffix = ' …(truncated)'
+    return `${text.slice(0, Math.max(0, limit - suffix.length))}${suffix}`
 }
 
 function parseLog(content: string, fallbackLevel: LogLevel): ParsedLog | null {
@@ -123,22 +128,27 @@ function parseLog(content: string, fallbackLevel: LogLevel): ParsedLog | null {
     }
 }
 
-function maskEmail(value: string): string {
+function maskIdentifier(value: string): string {
+    if (!value) return 'Unknown'
     const at = value.indexOf('@')
-    if (at <= 0) return value
-    const local = value.slice(0, at)
-    const domain = value.slice(at + 1)
-    const visible = local.slice(0, Math.min(2, local.length))
-    return `${visible}${local.length > visible.length ? '***' : ''}@${domain}`
+    if (at > 0) {
+        const local = value.slice(0, at)
+        const domain = value.slice(at + 1)
+        const visible = local.slice(0, Math.min(2, local.length))
+        return `${visible}${local.length > visible.length ? '***' : ''}@${domain}`
+    }
+    if (value.length <= 2) return `${value[0] ?? '*'}*`
+    return `${value.slice(0, 2)}***`
 }
 
 function displayAccount(account: string, shouldMask: boolean): string {
     if (!account || account === 'MAIN') return 'Main process'
-    return shouldMask ? maskEmail(account) : account
+    return shouldMask ? maskIdentifier(account) : account
 }
 
-function sanitizeText(text: string, maskEmails = true): string {
+function sanitizeText(text: string, maskAccounts = true): string {
     let out = text
+        .replace(/https?:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/[^\s)]+/gi, '[Discord webhook redacted]')
         .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
         .replace(
             /([?&](?:access_token|refresh_token|id_token|token|secret|code|assertion|session|auth)=)[^&#\s]+/gi,
@@ -146,8 +156,8 @@ function sanitizeText(text: string, maskEmails = true): string {
         )
         .replace(/((?:access_token|refresh_token|id_token|token|secret|assertion)\s*[=:]\s*)[^|,;\s]+/gi, '$1[redacted]')
 
-    if (maskEmails) {
-        out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, value => maskEmail(value))
+    if (maskAccounts) {
+        out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, value => maskIdentifier(value))
     }
 
     return out
@@ -212,7 +222,7 @@ function progressBar(value: number, total: number, width = 10): string {
 
 function addField(fields: DiscordField[], name: string, value: string | undefined, inline = true): void {
     if (!value) return
-    fields.push({ name, value: truncate(value, EMBED_FIELD_LIMIT), inline })
+    fields.push({ name: truncate(name, 256), value: truncate(value, EMBED_FIELD_LIMIT), inline })
 }
 
 function safeHttpUrl(value: string | undefined): string | undefined {
@@ -220,6 +230,17 @@ function safeHttpUrl(value: string | undefined): string | undefined {
     try {
         const url = new URL(value)
         return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined
+    } catch {
+        return undefined
+    }
+}
+
+function discordRequestUrl(value: string): string | undefined {
+    try {
+        const url = new URL(value)
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined
+        url.searchParams.set('wait', 'true')
+        return url.toString()
     } catch {
         return undefined
     }
@@ -233,13 +254,14 @@ function toIsoTimestamp(value: string): string | undefined {
 function parseBooleanEnv(name: string, fallback: boolean): boolean {
     const raw = process.env[name]
     if (raw === undefined || raw === '') return fallback
-    if (raw === 'true') return true
-    if (raw === 'false') return false
+    if (raw.toLowerCase() === 'true') return true
+    if (raw.toLowerCase() === 'false') return false
     return fallback
 }
 
 function resolveMode(value: string | undefined, fallback: DiscordNotificationMode): DiscordNotificationMode {
-    return value === 'summary' || value === 'standard' || value === 'verbose' ? value : fallback
+    const normalized = value?.toLowerCase()
+    return normalized === 'summary' || normalized === 'standard' || normalized === 'verbose' ? normalized : fallback
 }
 
 function resolveSettings(config: WebhookDiscordConfig): ResolvedDiscordSettings {
@@ -257,9 +279,35 @@ function resolveSettings(config: WebhookDiscordConfig): ResolvedDiscordSettings 
     }
 }
 
+function cleanupMap(map: Map<string, number>, windowMs: number, maxEntries: number): void {
+    const now = Date.now()
+    for (const [key, seenAt] of map) {
+        if (now - seenAt > windowMs) map.delete(key)
+    }
+    while (map.size > maxEntries) {
+        const oldest = map.keys().next().value as string | undefined
+        if (!oldest) break
+        map.delete(oldest)
+    }
+}
+
+function shouldTrackEvent(parsed: ParsedLog): boolean {
+    if (parsed.event === 'RUN-START') return true
+    const key = `${parsed.level}|${parsed.event}|${parsed.message}`
+    const now = Date.now()
+    const previous = recentTrackedEvents.get(key)
+    recentTrackedEvents.set(key, now)
+    cleanupMap(recentTrackedEvents, TRACK_DEDUPE_WINDOW_MS, MAX_RECENT_TRACKED)
+    return previous === undefined || now - previous >= TRACK_DEDUPE_WINDOW_MS
+}
+
 function isSignificantWarning(parsed: ParsedLog): boolean {
     const text = parsed.message.toLowerCase()
     if (parsed.event === 'SEARCH-ON-BING-SEARCH' && text.includes('skipping incompatible searchonbing offer')) return false
+    if (parsed.event === 'SEARCH-ON-BING' && text.includes('failed searchonbing')) {
+        const offerId = metric(parsed.message, 'offerId')
+        if (offerId && skippedOfferIds.has(offerId)) return false
+    }
     if (parsed.event === 'BROWSER' && text.includes('browser context closed')) return false
     return (
         text.includes('out of memory') ||
@@ -272,13 +320,13 @@ function isSignificantWarning(parsed: ParsedLog): boolean {
 }
 
 function trackRun(parsed: ParsedLog | null, fallbackLevel: LogLevel): void {
-    if (!parsed) return
+    if (!parsed || !shouldTrackEvent(parsed)) return
 
     if (parsed.event === 'RUN-START') {
         runTotals = emptyRunTotals()
         runTotals.version = parsed.message.match(/\|\s*(v\d+(?:\.\d+)*)\s*\|/)?.[1]
-        runTotals.accountsPlanned = numberColonMetric(parsed.message, 'Accounts')
-        runTotals.clusters = numberColonMetric(parsed.message, 'Clusters')
+        skippedOfferIds.clear()
+        recentTrackedEvents.clear()
         return
     }
 
@@ -308,7 +356,11 @@ function trackRun(parsed: ParsedLog | null, fallbackLevel: LogLevel): void {
             if (parsed.message.startsWith('Search summary')) runTotals.search = numberMetric(parsed.message, 'total')
             break
         case 'SEARCH-ON-BING-SEARCH':
-            if (parsed.message.includes('Skipping incompatible SearchOnBing offer')) runTotals.skippedOffers += 1
+            if (parsed.message.includes('Skipping incompatible SearchOnBing offer')) {
+                runTotals.skippedOffers += 1
+                const offerId = metric(parsed.message, 'offerId')
+                if (offerId) skippedOfferIds.add(offerId)
+            }
             break
         case 'ACCOUNT-END':
             runTotals.accountsCompleted += 1
@@ -361,6 +413,59 @@ function footer(settings: ResolvedDiscordSettings, parsed: ParsedLog): DiscordEm
     return out
 }
 
+function embedCharCount(embed: DiscordEmbed): number {
+    let total = (embed.title?.length ?? 0) + (embed.description?.length ?? 0)
+    total += embed.footer?.text.length ?? 0
+    total += embed.author?.name.length ?? 0
+    for (const field of embed.fields ?? []) total += field.name.length + field.value.length
+    return total
+}
+
+function fitEmbedToDiscordLimits(embed: DiscordEmbed): DiscordEmbed {
+    const fitted: DiscordEmbed = {
+        ...embed,
+        title: truncate(embed.title, 256),
+        description: embed.description ? truncate(embed.description, 4096) : undefined,
+        author: embed.author ? { ...embed.author, name: truncate(embed.author.name, 256) } : undefined,
+        footer: embed.footer ? { ...embed.footer, text: truncate(embed.footer.text, 2048) } : undefined,
+        fields: embed.fields?.slice(0, 25).map(field => ({
+            ...field,
+            name: truncate(field.name, 256),
+            value: truncate(field.value, 1024)
+        }))
+    }
+
+    while (embedCharCount(fitted) > EMBED_TOTAL_LIMIT) {
+        const fields = fitted.fields ?? []
+        let longestIndex = -1
+        let longestLength = 0
+        for (let i = 0; i < fields.length; i++) {
+            const length = fields[i]?.value.length ?? 0
+            if (length > longestLength) {
+                longestLength = length
+                longestIndex = i
+            }
+        }
+
+        if (longestIndex >= 0 && longestLength > 160) {
+            const field = fields[longestIndex]
+            if (field) field.value = truncate(field.value, Math.max(160, field.value.length - 300))
+            continue
+        }
+        if (fitted.description && fitted.description.length > 500) {
+            fitted.description = truncate(fitted.description, Math.max(500, fitted.description.length - 300))
+            continue
+        }
+        if (fields.length > 0) {
+            fields.pop()
+            continue
+        }
+        break
+    }
+
+    return fitted
+}
+
 function commonEmbed(
     settings: ResolvedDiscordSettings,
     parsed: ParsedLog,
@@ -370,17 +475,17 @@ function commonEmbed(
     fields: DiscordField[]
 ): DiscordEmbed {
     const embed: DiscordEmbed = {
-        title: truncate(title, 256),
-        description: truncate(description),
+        title,
+        description,
         color,
-        fields: fields.length > 0 ? fields.slice(0, 25) : undefined,
+        fields: fields.length > 0 ? fields : undefined,
         footer: footer(settings, parsed),
         author: baseAuthor(settings),
         timestamp: toIsoTimestamp(parsed.timestamp)
     }
     if (settings.dashboardUrl) embed.url = settings.dashboardUrl
     if (settings.avatarUrl) embed.thumbnail = { url: settings.avatarUrl }
-    return embed
+    return fitEmbedToDiscordLimits(embed)
 }
 
 function humanizeEvent(event: string): string {
@@ -397,16 +502,15 @@ function buildPremiumEmbed(
     settings: ResolvedDiscordSettings
 ): DiscordEmbed {
     if (!parsed) {
-        const title = level === 'error' ? '🚨 Rewards Error' : level === 'warn' ? '⚠️ Rewards Warning' : 'ℹ️ Rewards Update'
         const embed: DiscordEmbed = {
-            title,
-            description: truncate(sanitizeText(content, settings.maskAccount)),
+            title: level === 'error' ? '🚨 Rewards Error' : level === 'warn' ? '⚠️ Rewards Warning' : 'ℹ️ Rewards Update',
+            description: sanitizeText(content, settings.maskAccount),
             color: level === 'error' ? COLORS.error : level === 'warn' ? COLORS.warning : COLORS.info,
             author: baseAuthor(settings)
         }
         if (settings.dashboardUrl) embed.url = settings.dashboardUrl
         if (settings.avatarUrl) embed.thumbnail = { url: settings.avatarUrl }
-        return embed
+        return fitEmbedToDiscordLimits(embed)
     }
 
     const fields: DiscordField[] = []
@@ -417,7 +521,7 @@ function buildPremiumEmbed(
     if (parsed.platform !== 'MAIN') addField(fields, '🖥️ Platform', parsed.platform === 'MOBILE' ? '📱 Mobile' : '🖥️ Desktop')
 
     if (parsed.level === 'error') {
-        addField(fields, '🛡️ Run health', '🔴 **Error detected**\nThe run may continue, but this event needs attention.', false)
+        addField(fields, '🛡️ Run health', '🔴 **Error detected**\nThis event needs attention.', false)
         addField(fields, '🔗 Dashboard', dashboardField(settings), false)
         return commonEmbed(
             settings,
@@ -432,11 +536,9 @@ function buildPremiumEmbed(
     switch (parsed.event) {
         case 'RUN-START': {
             const version = cleanMessage.match(/\|\s*(v\d+(?:\.\d+)*)\s*\|/)?.[1] ?? runTotals.version
-            const accounts = colonMetric(cleanMessage, 'Accounts')
-            const clusters = colonMetric(cleanMessage, 'Clusters')
             addField(fields, '📦 Version', version)
-            addField(fields, '👥 Accounts', accounts)
-            addField(fields, '⚙️ Clusters', clusters)
+            addField(fields, '👥 Accounts', colonMetric(cleanMessage, 'Accounts'))
+            addField(fields, '⚙️ Clusters', colonMetric(cleanMessage, 'Clusters'))
             addField(fields, '🔔 Notification mode', settings.mode.toUpperCase())
             addField(fields, '🛡️ Status', '🔵 **Initializing**\n`▰▱▱▱▱▱▱▱▱▱`', false)
             addField(fields, '🔗 Dashboard', dashboardField(settings), false)
@@ -444,7 +546,7 @@ function buildPremiumEmbed(
                 settings,
                 parsed,
                 '🚀 Microsoft Rewards • Run Started',
-                'A new automated Rewards run is starting. I’ll report meaningful milestones and the final earnings summary.',
+                'A new automated Rewards run is starting. Meaningful milestones and the final earnings summary will be reported here.',
                 COLORS.info,
                 fields
             )
@@ -470,12 +572,12 @@ function buildPremiumEmbed(
             addField(fields, '📱 Mobile', `**${formatPoints(mobile)} pts**\n${progressBar(mobile, total, 7)}`)
             addField(fields, '🖥️ Browser', `**${formatPoints(browser)} pts**\n${progressBar(browser, total, 7)}`)
             addField(fields, '📲 App', `**${formatPoints(app)} pts**\n${progressBar(app, total, 7)}`)
-            addField(fields, '💎 Detected potential', `**${formatPoints(total)} points** available across the reported earning buckets.`, false)
+            addField(fields, '💎 Detected potential', `**${formatPoints(total)} points** across the reported search/app earning buckets.`, false)
             return commonEmbed(
                 settings,
                 parsed,
                 `💰 Today's Earning Potential • ${formatPoints(total)} pts`,
-                'Here’s the Rewards earning potential detected at the start of this account run.',
+                'Rewards earning potential detected at the start of this account run.',
                 COLORS.points,
                 fields
             )
@@ -488,57 +590,29 @@ function buildPremiumEmbed(
         case 'MORE-PROMOTIONS': {
             addField(fields, '✅ Status', 'Complete')
             addField(fields, '📍 Stage', 'More Promotions')
-            return commonEmbed(
-                settings,
-                parsed,
-                '✨ More Promotions Complete',
-                'Available More Promotions activities have been processed.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, '✨ More Promotions Complete', 'Available More Promotions activities have been processed.', COLORS.success, fields)
         }
         case 'DAILY-CHECK-IN': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(
-                settings,
-                parsed,
-                `📅 Daily Check-In • +${formatPoints(gained)} pts`,
-                'Daily check-in completed successfully.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, `📅 Daily Check-In • +${formatPoints(gained)} pts`, 'Daily check-in completed successfully.', COLORS.success, fields)
         }
         case 'APP-PROMOTIONS': {
             addField(fields, '✅ Status', 'Complete')
             addField(fields, '📍 Stage', 'App Promotions')
-            return commonEmbed(
-                settings,
-                parsed,
-                '📱 App Promotions Complete',
-                'Available app promotion activities have been processed.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, '📱 App Promotions Complete', 'Available app promotion activities have been processed.', COLORS.success, fields)
         }
         case 'READ-TO-EARN': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const articles = numberMetric(cleanMessage, 'articlesRead')
             const balance = numberMetric(cleanMessage, 'currentBalance')
-            addField(fields, '📰 Articles', `**${formatPoints(articles)}**`)
+            addField(fields, '📰 Articles', `**${Math.round(articles)}**`)
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
-            addField(fields, '📈 Completion', `${progressBar(articles, Math.max(articles, 10), 10)}  **100%**`, false)
-            return commonEmbed(
-                settings,
-                parsed,
-                `📰 Read to Earn Complete • +${formatPoints(gained)} pts`,
-                'All reported Read to Earn articles were processed successfully.',
-                COLORS.success,
-                fields
-            )
+            addField(fields, '📈 Completion', `${progressBar(articles, Math.max(articles, 1), 10)}  **100%**`, false)
+            return commonEmbed(settings, parsed, `📰 Read to Earn Complete • +${formatPoints(gained)} pts`, 'All reported Read to Earn articles were processed successfully.', COLORS.success, fields)
         }
         case 'PUNCHCARD': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
@@ -549,14 +623,7 @@ function buildPremiumEmbed(
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
             if (target > 0) addField(fields, '🏁 Target', `${formatPoints(target)} pts`)
-            return commonEmbed(
-                settings,
-                parsed,
-                `🎯 Punchcard Complete${gained > 0 ? ` • +${formatPoints(gained)} pts` : ''}`,
-                'A Rewards quest/punchcard reached its completed state.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, `🎯 Punchcard Complete${gained > 0 ? ` • +${formatPoints(gained)} pts` : ''}`, 'A Rewards quest/punchcard reached its completed state.', COLORS.success, fields)
         }
         case 'SEARCH-MANAGER': {
             const mobile = numberMetric(cleanMessage, 'mobile')
@@ -567,42 +634,21 @@ function buildPremiumEmbed(
             addField(fields, '🖥️ Desktop', `**+${formatPoints(desktop)}**`)
             addField(fields, '✨ Bonus', `**+${formatPoints(bonus)}**`)
             addField(fields, '🔎 Search total', `**+${formatPoints(total)} points**\n${progressBar(total, Math.max(total, 1), 10)}`, false)
-            return commonEmbed(
-                settings,
-                parsed,
-                `🔎 Search Phase Complete • +${formatPoints(total)} pts`,
-                'Search earning is complete for this account.',
-                COLORS.search,
-                fields
-            )
+            return commonEmbed(settings, parsed, `🔎 Search Phase Complete • +${formatPoints(total)} pts`, 'Search earning is complete for this account.', COLORS.search, fields)
         }
         case 'CLAIM-BONUS-POINTS': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '🎁 Claimed', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(
-                settings,
-                parsed,
-                `🎁 Bonus Claimed • +${formatPoints(gained)} pts`,
-                'Available bonus points were claimed successfully.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, `🎁 Bonus Claimed • +${formatPoints(gained)} pts`, 'Available bonus points were claimed successfully.', COLORS.success, fields)
         }
         case 'FLOW': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '💎 Account earnings', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Current balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(
-                settings,
-                parsed,
-                `📊 Account Earnings • +${formatPoints(gained)} pts`,
-                'Foreground earning activities for this account are complete.',
-                COLORS.activity,
-                fields
-            )
+            return commonEmbed(settings, parsed, `📊 Account Earnings • +${formatPoints(gained)} pts`, 'Foreground earning activities for this account are complete.', COLORS.activity, fields)
         }
         case 'ACCOUNT-END': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
@@ -615,14 +661,7 @@ function buildPremiumEmbed(
             addField(fields, '⏱️ Runtime', `**${formatDurationSeconds(duration)}**`)
             if (rate > 0) addField(fields, '⚡ Efficiency', `**${rate.toFixed(1)} pts/min**`)
             addField(fields, '✅ Result', '**SUCCESS**\nAccount completed cleanly.', false)
-            return commonEmbed(
-                settings,
-                parsed,
-                `✅ Account Complete • +${formatPoints(gained)} pts`,
-                'This account finished successfully and its final balance was recorded.',
-                COLORS.success,
-                fields
-            )
+            return commonEmbed(settings, parsed, `✅ Account Complete • +${formatPoints(gained)} pts`, 'This account finished successfully and its final balance was recorded.', COLORS.success, fields)
         }
         case 'RUN-END': {
             const accounts = numberMetric(cleanMessage, 'accountsProcessed')
@@ -633,10 +672,10 @@ function buildPremiumEmbed(
             const rate = runtimeMinutes > 0 ? gained / runtimeMinutes : 0
             const healthy = runTotals.errors === 0 && runTotals.significantWarnings === 0
 
-            addField(fields, '💎 Total earned', `# **+${formatPoints(gained)} pts**`)
+            addField(fields, '💎 Total earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `${formatPoints(previous)} → **${formatPoints(current)}**`)
             addField(fields, '⏱️ Runtime', `**${formatRuntimeMinutes(runtimeMinutes)}**`)
-            addField(fields, '👥 Accounts', `**${formatPoints(accounts)} processed**\n${runTotals.accountsCompleted} completed`)
+            addField(fields, '👥 Accounts', `**${Math.round(accounts)} processed**\n${runTotals.accountsCompleted} completed`)
             if (rate > 0) addField(fields, '⚡ Efficiency', `**${rate.toFixed(1)} pts/min**`)
             addField(fields, '📊 Earnings breakdown', earningRows(gained), false)
             addField(
@@ -652,12 +691,8 @@ function buildPremiumEmbed(
             return commonEmbed(
                 settings,
                 parsed,
-                healthy
-                    ? `🏆 Rewards Run Complete • +${formatPoints(gained)} pts`
-                    : `⚠️ Rewards Run Complete with Issues • +${formatPoints(gained)} pts`,
-                healthy
-                    ? '**SUCCESS** — All configured accounts finished and the run closed cleanly.'
-                    : '**COMPLETED** — The run reached the end, but some noteworthy issues were observed.',
+                healthy ? `🏆 Rewards Run Complete • +${formatPoints(gained)} pts` : `⚠️ Rewards Run Complete with Issues • +${formatPoints(gained)} pts`,
+                healthy ? '**SUCCESS** — All configured accounts finished and the run closed cleanly.' : '**COMPLETED** — The run reached the end, but some noteworthy issues were observed.',
                 healthy ? COLORS.success : COLORS.warning,
                 fields
             )
@@ -669,14 +704,7 @@ function buildPremiumEmbed(
                 addField(fields, '🎫 Offer', title || offerId, false)
                 if (offerId && title) addField(fields, '🆔 Offer ID', offerId, false)
                 addField(fields, '🛡️ Safety', 'Skipped without fabricating completion or offer progress.', false)
-                return commonEmbed(
-                    settings,
-                    parsed,
-                    '⏭️ Explore on Bing Offer Skipped Safely',
-                    'Bing did not expose a compatible interactive search box, so the incompatible promotion was skipped.',
-                    COLORS.warning,
-                    fields
-                )
+                return commonEmbed(settings, parsed, '⏭️ Explore on Bing Offer Skipped Safely', 'Bing did not expose a compatible interactive search box, so the incompatible promotion was skipped.', COLORS.warning, fields)
             }
             break
         }
@@ -685,14 +713,7 @@ function buildPremiumEmbed(
     }
 
     const title = parsed.level === 'warn' ? `⚠️ ${humanizeEvent(parsed.event)}` : `ℹ️ ${humanizeEvent(parsed.event)}`
-    return commonEmbed(
-        settings,
-        parsed,
-        title,
-        cleanMessage,
-        parsed.level === 'warn' ? COLORS.warning : COLORS.info,
-        fields
-    )
+    return commonEmbed(settings, parsed, title, cleanMessage, parsed.level === 'warn' ? COLORS.warning : COLORS.info, fields)
 }
 
 const SUMMARY_EVENTS = new Set(['RUN-START', 'ACCOUNT-END', 'RUN-END'])
@@ -762,34 +783,25 @@ function isDuplicate(key: string): boolean {
     const now = Date.now()
     const previous = recentNotifications.get(key)
     recentNotifications.set(key, now)
-
-    for (const [existingKey, seenAt] of recentNotifications) {
-        if (now - seenAt > DEDUPE_WINDOW_MS) recentNotifications.delete(existingKey)
-    }
-
-    while (recentNotifications.size > MAX_RECENT_NOTIFICATIONS) {
-        const oldest = recentNotifications.keys().next().value as string | undefined
-        if (!oldest) break
-        recentNotifications.delete(oldest)
-    }
-
+    cleanupMap(recentNotifications, DEDUPE_WINDOW_MS, MAX_RECENT_NOTIFICATIONS)
     return previous !== undefined && now - previous < DEDUPE_WINDOW_MS
 }
 
 function retryDelayMs(error: unknown, attempt: number): number {
     const response = (error as { response?: HttpResponse<unknown> })?.response
     const data = response?.data as { retry_after?: number } | undefined
-    const retryAfterBody = Number(data?.retry_after)
-    if (Number.isFinite(retryAfterBody) && retryAfterBody > 0) {
-        return retryAfterBody > 1000 ? retryAfterBody : retryAfterBody * 1000
-    }
+    const retryAfterSeconds = Number(data?.retry_after)
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) return Math.ceil(retryAfterSeconds * 1000)
 
     const retryHeader = response?.headers?.['retry-after']
     const retryHeaderValue = Array.isArray(retryHeader) ? retryHeader[0] : retryHeader
-    const retryAfterHeader = Number(retryHeaderValue)
-    if (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0) {
-        return retryAfterHeader > 1000 ? retryAfterHeader : retryAfterHeader * 1000
-    }
+    const retryHeaderSeconds = Number(retryHeaderValue)
+    if (Number.isFinite(retryHeaderSeconds) && retryHeaderSeconds > 0) return Math.ceil(retryHeaderSeconds * 1000)
+
+    const resetAfterHeader = response?.headers?.['x-ratelimit-reset-after']
+    const resetAfterValue = Array.isArray(resetAfterHeader) ? resetAfterHeader[0] : resetAfterHeader
+    const resetAfterSeconds = Number(resetAfterValue)
+    if (Number.isFinite(resetAfterSeconds) && resetAfterSeconds > 0) return Math.ceil(resetAfterSeconds * 1000)
 
     return Math.min(1000 * 2 ** attempt, 8000)
 }
@@ -806,9 +818,11 @@ async function postWithRetry(request: HttpRequestConfig): Promise<void> {
         } catch (error) {
             const response = (error as { response?: HttpResponse<unknown>; status?: number })?.response
             const status = response?.status ?? (error as { status?: number })?.status
-            const retriable = status === 429 || (status !== undefined && status >= 500 && status <= 599)
+            const retriable = status === undefined || status === 429 || (status >= 500 && status <= 599)
             if (!retriable || attempt >= MAX_SEND_ATTEMPTS - 1) return
-            await sleep(retryDelayMs(error, attempt))
+            const delay = retryDelayMs(error, attempt)
+            if (delay > MAX_RETRY_DELAY_MS) return
+            await sleep(delay)
         }
     }
 }
@@ -820,6 +834,8 @@ export async function sendDiscordPremium(
     webhookAllowed = true
 ): Promise<void> {
     if (!config.url) return
+    const requestUrl = discordRequestUrl(config.url)
+    if (!requestUrl) return
 
     const settings = resolveSettings(config)
     const parsed = parseLog(content, level)
@@ -838,7 +854,7 @@ export async function sendDiscordPremium(
 
     const request: HttpRequestConfig = {
         method: 'POST',
-        url: config.url,
+        url: requestUrl,
         headers: { 'Content-Type': 'application/json' },
         data,
         timeout: 10000
@@ -847,6 +863,6 @@ export async function sendDiscordPremium(
     await discordQueue.add(() => postWithRetry(request))
 }
 
-export function flushDiscordPremiumQueue(timeoutMs = 5000): Promise<void> {
+export function flushDiscordPremiumQueue(timeoutMs = 15_000): Promise<void> {
     return flushQueue(discordQueue, timeoutMs)
 }
