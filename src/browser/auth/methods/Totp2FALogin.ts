@@ -5,9 +5,10 @@ import { canPromptForInput, getErrorMessage, promptInput } from './LoginUtils'
 
 export class TotpLogin {
     private readonly textInputSelector =
-        'form[name="OneTimeCodeViewForm"] input[type="text"], input#floatingLabelInput5'
-    private readonly secondairyInputSelector = 'input[id="otc-confirmation-input"], input[name="otc"]'
-    private readonly submitButtonSelector = 'button[type="submit"]'
+        'form[name="OneTimeCodeViewForm"] input[type="text"], input#floatingLabelInput5, input#iOttText'
+    private readonly secondairyInputSelector =
+        'input[id="otc-confirmation-input"], input[name="otc"], input#iOttText'
+    private readonly submitButtonSelector = 'button[type="submit"], input[type="submit"], input#iVerifyCodeAction'
     private readonly maxManualSeconds = 60
     private readonly maxManualAttempts = 5
 
@@ -124,7 +125,6 @@ export class TotpLogin {
                 }
                 await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {})
 
-                // Check if wrong code was entered
                 const errorMessage = await getErrorMessage(page)
                 if (errorMessage) {
                     this.bot.logger.warn(
@@ -138,9 +138,6 @@ export class TotpLogin {
                     }
                     continue
                 }
-
-                this.bot.logger.info(this.bot.isMobile, 'LOGIN-TOTP', 'TOTP authentication completed successfully')
-                return
             }
 
             throw new Error(`TOTP input failed after ${this.maxManualAttempts} attempts`)
