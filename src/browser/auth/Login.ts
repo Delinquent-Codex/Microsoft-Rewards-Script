@@ -68,7 +68,7 @@ export class Login {
         accountLocked: '#serviceAbuseLandingTitle',
         errorAlert: 'div[role="alert"]',
         passwordEntry: '[data-testid="passwordEntry"]',
-        emailEntry: 'input#usernameEntry',
+        emailEntry: 'input#usernameEntry, [data-testid="usernameEntry"] input[type="email"], input[type="email"]',
         kmsiVideo: '[data-testid="kmsiVideo"]',
         passKeyVideo: '[data-testid="biometricVideo"]',
         passKeyError: '[data-testid="registrationImg"]',
@@ -199,6 +199,26 @@ export class Login {
             return 'LOGGED_IN'
         }
 
+// Microsoft Fluent login sometimes renders the username field correctly
+// while Patchright's short visibility check fails to recognize it.
+// Detect the current username-entry markup directly as a fallback.
+const microsoftUsernameInput = page.locator(
+    'input#usernameEntry, [data-testid="usernameEntry"] input[type="email"]'
+).first()
+
+const hasMicrosoftUsernameInput =
+    (await microsoftUsernameInput.isVisible().catch(() => false)) ||
+    ((await microsoftUsernameInput.count().catch(() => 0)) > 0)
+
+if (hasMicrosoftUsernameInput) {
+    this.bot.logger.debug(
+        this.bot.isMobile,
+        'DETECT-STATE',
+        'Microsoft username input detected via fallback'
+    )
+    return 'EMAIL_INPUT'
+}
+        
         const stateChecks: Array<[string, LoginState]> = [
             [this.selectors.errorAlert, 'ERROR_ALERT'],
             [this.selectors.passwordEntry, 'PASSWORD_INPUT'],
