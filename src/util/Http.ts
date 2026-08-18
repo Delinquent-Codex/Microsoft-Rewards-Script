@@ -119,6 +119,18 @@ function backoff(attempt: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function isIdempotentRequest(init: ImpitRequestInit): boolean {
+    const method = String(init.method ?? 'GET').toUpperCase()
+    return method === 'GET' || method === 'HEAD'
+}
+
+function isTransientResponseStreamError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error)
+    return /error reading response stream|protocol_error|stream(?:id)?\([^)]*\).*reset|connection reset|body.*reset/i.test(
+        message
+    )
+}
+
 async function send<T>(
     instance: Impit,
     url: string,
@@ -147,7 +159,17 @@ async function send<T>(
             continue
         }
 
-        const out = await toResponse<T>(res, config)
+        let out: HttpResponse<T>
+        try {
+            out = await toResponse<T>(res, config)
+        } catch (error) {
+            if (isIdempotentRequest(init) && isTransientResponseStreamError(error) && attempt < retries) {
+                await backoff(attempt++)
+                continue
+            }
+            throw error
+        }
+
         if (res.status < 200 || res.status >= 300) {
             const error = new Error(`Request failed with status code ${res.status}`) as Error & {
                 response?: HttpResponse<T>
