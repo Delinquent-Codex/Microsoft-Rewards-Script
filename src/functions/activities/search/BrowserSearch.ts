@@ -1,4 +1,4 @@
-import type { Page } from 'patchright'
+import type { Locator, Page } from 'patchright'
 
 import { URLs } from '../../../constants/urls'
 import { SearchQueryQueue } from '../../SearchQueryQueue'
@@ -8,22 +8,30 @@ import { SearchProgress } from './SearchProgress'
 import type { SearchTracker } from '../../../interface/Search'
 import type { MissingSearchPoints } from '../../../interface/Points'
 import type { MicrosoftRewardsBot } from '../../../index'
-import { sampleProcessMemory } from '../../../util/ProcessMemory'
+import { sampleProcessMemory, type ProcessMemorySnapshot } from '../../../util/ProcessMemory'
 
 const HARD_RECYCLE_EVERY = 5
-const MEMORY_RECYCLE_THRESHOLD_MB = 360
-const MAX_QUERY_ATTEMPTS = 5
+const MAX_QUERY_ATTEMPTS = 2
+const SEARCH_BOX_WAIT_MS = 4000
+const CONTAINER_RECYCLE_THRESHOLD_PERCENT = 82
+const CONTAINER_ABORT_THRESHOLD_PERCENT = 90
+const FALLBACK_NODE_RSS_RECYCLE_MB = 260
 
 const POINTS_MAX_SEARCHES = 100
 const POINTS_STAGNANT_LIMIT = 10
 
-const SEARCH_BOX = '#sb_form_q'
+const SEARCH_BOX_SELECTORS = ['#sb_form_q', 'input[name="q"]', 'textarea[name="q"]', '[role="searchbox"]'] as const
 const RESULT_LINK = '#b_results .b_algo h2'
 
 interface SessionStats {
     totalGained: number
     performed: number
     stagnant: number
+}
+
+interface SearchBoxMatch {
+    locator: Locator
+    selector: string
 }
 
 export class Search extends BaseActivity {
@@ -113,7 +121,25 @@ export class Search extends BaseActivity {
             await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
             await this.bot.browser.utils.tryDismissAllMessages(page)
 
+            if (!(await this.ensureSearchReady(page, isMobile))) {
+                this.bot.logger.warn(
+                    isMobile,
+                    tracker.context,
+                    `Bing interactive search UI unavailable; stopping search session without counting failed searches | currentUrl=${page.url()}`
+                )
+                return stats
+            }
+
             while (!tracker.done() && stats.performed < tracker.maxSearches && stats.stagnant < tracker.stagnantLimit) {
+                if (await this.handleMemoryPressure(page, isMobile)) {
+                    this.bot.logger.warn(
+                        isMobile,
+                        tracker.context,
+                        `Stopping Bing searches to protect container memory | ${tracker.progress()}`
+                    )
+                    break
+                }
+
                 const query = await queryQueue.next()
                 if (!query) {
                     this.bot.logger.warn(isMobile, tracker.context, 'Query queue exhausted, stopping')
@@ -121,7 +147,16 @@ export class Search extends BaseActivity {
                 }
 
                 await this.bot.browser.func.synchronizeActiveBrowserCookies('SEARCH-COOKIE-SEED', true)
-                await this.bingSearch(page, query, isMobile)
+                const searched = await this.bingSearch(page, query, isMobile)
+                if (!searched) {
+                    this.bot.logger.warn(
+                        isMobile,
+                        tracker.context,
+                        `Bing interactive search unavailable after recovery attempt; stopping search session | query="${query}" | ${tracker.progress()}`
+                    )
+                    break
+                }
+
                 stats.performed++
 
                 await this.bot.browser.func.synchronizeActiveBrowserCookies('SEARCH-COOKIE-CAPTURE')
@@ -144,14 +179,13 @@ export class Search extends BaseActivity {
                     )
                 }
 
-                const memory = sampleProcessMemory()
-                if (memory.treeRssMb >= MEMORY_RECYCLE_THRESHOLD_MB) {
+                if (await this.handleMemoryPressure(page, isMobile)) {
                     this.bot.logger.warn(
                         isMobile,
-                        'MEMORY',
-                        `High browser-process memory during Bing searches | treeRssMb=${memory.treeRssMb.toFixed(1)} | nodeRssMb=${memory.nodeRssMb.toFixed(1)} | processes=${memory.processCount} | thresholdMb=${MEMORY_RECYCLE_THRESHOLD_MB}`
+                        tracker.context,
+                        `Stopping Bing searches after memory-pressure check | ${tracker.progress()}`
                     )
-                    await this.hardRecyclePage(page, isMobile, 'memory-pressure')
+                    break
                 }
             }
 
@@ -166,28 +200,41 @@ export class Search extends BaseActivity {
         }
     }
 
-    private async bingSearch(page: Page, query: string, isMobile: boolean): Promise<void> {
-        this.searchCount++
-
-        if (this.searchCount % HARD_RECYCLE_EVERY === 0) {
+    private async bingSearch(page: Page, query: string, isMobile: boolean): Promise<boolean> {
+        if (this.searchCount > 0 && this.searchCount % HARD_RECYCLE_EVERY === 0) {
             await this.hardRecyclePage(page, isMobile, `periodic-${this.searchCount}`)
         }
 
         for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
-            try {
-                const searchBox = page.locator(SEARCH_BOX)
+            if (await this.handleMemoryPressure(page, isMobile)) return false
 
+            const searchBox = await this.findSearchBox(page, SEARCH_BOX_WAIT_MS)
+            if (!searchBox) {
+                this.bot.logger.warn(
+                    isMobile,
+                    'SEARCH-BING',
+                    `Search attempt ${attempt}/${MAX_QUERY_ATTEMPTS} unavailable: no visible interactive search box | query="${query}" | currentUrl=${page.url()}`
+                )
+                if (attempt < MAX_QUERY_ATTEMPTS) {
+                    await this.hardRecyclePage(page, isMobile, 'search-ui-missing')
+                    continue
+                }
+                return false
+            }
+
+            try {
                 await page.evaluate(() => window.scrollTo({ left: 0, top: 0, behavior: 'auto' }))
                 await page.keyboard.press('Home')
-                await searchBox.waitFor({ state: 'visible', timeout: 15000 })
 
-                await this.bot.utils.wait(1000)
-                await this.bot.browser.utils.ghostClick(page, SEARCH_BOX, { clickCount: 3 })
-                await searchBox.fill('')
+                await this.bot.utils.wait(500)
+                await searchBox.locator.click({ clickCount: 3, timeout: 3000 })
+                await searchBox.locator.fill('')
 
                 await page.keyboard.type(query, { delay: this.bot.utils.randomDelay(45, 90) })
                 await page.keyboard.press('Enter')
                 await this.bot.utils.wait(3000)
+
+                this.searchCount++
 
                 if (this.bot.config.searchSettings.scrollRandomResults) {
                     await this.bot.utils.wait(2000)
@@ -205,16 +252,91 @@ export class Search extends BaseActivity {
                     )
                 )
 
-                return
+                return true
             } catch (error) {
                 this.bot.logger.warn(
                     isMobile,
                     'SEARCH-BING',
-                    `Search attempt ${attempt}/${MAX_QUERY_ATTEMPTS} failed | query="${query}" | ${error instanceof Error ? error.message : String(error)}`
+                    `Search attempt ${attempt}/${MAX_QUERY_ATTEMPTS} interaction failed | selector=${searchBox.selector} | query="${query}" | ${error instanceof Error ? error.message : String(error)}`
                 )
-                await this.bot.utils.wait(2000)
+                if (attempt < MAX_QUERY_ATTEMPTS) {
+                    await this.hardRecyclePage(page, isMobile, 'search-interaction-retry')
+                }
             }
         }
+
+        return false
+    }
+
+    private async ensureSearchReady(page: Page, isMobile: boolean): Promise<boolean> {
+        if (await this.findSearchBox(page, SEARCH_BOX_WAIT_MS)) return true
+
+        this.bot.logger.warn(
+            isMobile,
+            'SEARCH-BING',
+            `Bing interactive search box not found; recycling page once before giving up | currentUrl=${page.url()}`
+        )
+        await this.hardRecyclePage(page, isMobile, 'initial-search-ui-missing')
+        return Boolean(await this.findSearchBox(page, SEARCH_BOX_WAIT_MS))
+    }
+
+    private async findSearchBox(page: Page, timeoutMs: number): Promise<SearchBoxMatch | null> {
+        const deadline = Date.now() + timeoutMs
+
+        while (Date.now() < deadline) {
+            if (page.isClosed()) return null
+
+            for (const selector of SEARCH_BOX_SELECTORS) {
+                const locator = page.locator(selector).first()
+                if (await locator.isVisible().catch(() => false)) {
+                    return { locator, selector }
+                }
+            }
+
+            await this.bot.utils.wait(250)
+        }
+
+        return null
+    }
+
+    private async handleMemoryPressure(page: Page, isMobile: boolean): Promise<boolean> {
+        const memory = sampleProcessMemory()
+        const usage = memory.containerUsagePercent
+
+        if (usage !== null && usage >= CONTAINER_ABORT_THRESHOLD_PERCENT) {
+            this.bot.logger.warn(
+                isMobile,
+                'MEMORY',
+                `Container memory critical; aborting Bing search phase before Render OOM kill | ${this.formatMemory(memory)} | abortThreshold=${CONTAINER_ABORT_THRESHOLD_PERCENT}%`
+            )
+            return true
+        }
+
+        const shouldRecycle =
+            usage !== null
+                ? usage >= CONTAINER_RECYCLE_THRESHOLD_PERCENT
+                : memory.nodeRssMb >= FALLBACK_NODE_RSS_RECYCLE_MB
+
+        if (!shouldRecycle) return false
+
+        this.bot.logger.warn(
+            isMobile,
+            'MEMORY',
+            `Elevated memory before/during Bing searches; recycling page | ${this.formatMemory(memory)} | recycleThreshold=${usage !== null ? `${CONTAINER_RECYCLE_THRESHOLD_PERCENT}%` : `${FALLBACK_NODE_RSS_RECYCLE_MB}MB node RSS`}`
+        )
+        await this.hardRecyclePage(page, isMobile, 'memory-pressure')
+
+        const after = sampleProcessMemory()
+        if (after.containerUsagePercent !== null && after.containerUsagePercent >= CONTAINER_ABORT_THRESHOLD_PERCENT) {
+            this.bot.logger.warn(
+                isMobile,
+                'MEMORY',
+                `Container memory remained critical after recycle; stopping Bing searches | ${this.formatMemory(after)}`
+            )
+            return true
+        }
+
+        return false
     }
 
     private async hardRecyclePage(page: Page, isMobile: boolean, reason: string): Promise<void> {
@@ -222,7 +344,7 @@ export class Search extends BaseActivity {
         this.bot.logger.info(
             isMobile,
             'MEMORY',
-            `Recycling Bing page | reason=${reason} | treeRssMb=${before.treeRssMb.toFixed(1)} | nodeRssMb=${before.nodeRssMb.toFixed(1)} | processes=${before.processCount}`
+            `Recycling Bing page | reason=${reason} | ${this.formatMemory(before)}`
         )
 
         for (const extraPage of page.context().pages()) {
@@ -239,17 +361,23 @@ export class Search extends BaseActivity {
         this.bot.logger.info(
             isMobile,
             'MEMORY',
-            `Bing page recycled | reason=${reason} | treeRssMb=${after.treeRssMb.toFixed(1)} | nodeRssMb=${after.nodeRssMb.toFixed(1)} | processes=${after.processCount}`
+            `Bing page recycled | reason=${reason} | ${this.formatMemory(after)}`
         )
+    }
+
+    private formatMemory(memory: ProcessMemorySnapshot): string {
+        const containerCurrent =
+            memory.containerCurrentMb === null ? 'n/a' : `${memory.containerCurrentMb.toFixed(1)}MB`
+        const containerLimit = memory.containerLimitMb === null ? 'n/a' : `${memory.containerLimitMb.toFixed(1)}MB`
+        const containerPercent =
+            memory.containerUsagePercent === null ? 'n/a' : `${memory.containerUsagePercent.toFixed(1)}%`
+
+        return `container=${containerCurrent}/${containerLimit} (${containerPercent}) | nodeRssMb=${memory.nodeRssMb.toFixed(1)} | treeRssEstimateMb=${memory.treeRssMb.toFixed(1)} | processes=${memory.processCount}`
     }
 
     private logMemory(isMobile: boolean, phase: string): void {
         const memory = sampleProcessMemory()
-        this.bot.logger.info(
-            isMobile,
-            'MEMORY',
-            `Process memory | phase=${phase} | treeRssMb=${memory.treeRssMb.toFixed(1)} | nodeRssMb=${memory.nodeRssMb.toFixed(1)} | processes=${memory.processCount}`
-        )
+        this.bot.logger.info(isMobile, 'MEMORY', `Process memory | phase=${phase} | ${this.formatMemory(memory)}`)
     }
 
     private async randomScroll(page: Page, isMobile: boolean) {
