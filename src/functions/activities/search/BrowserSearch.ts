@@ -8,8 +8,10 @@ import { SearchProgress } from './SearchProgress'
 import type { SearchTracker } from '../../../interface/Search'
 import type { MissingSearchPoints } from '../../../interface/Points'
 import type { MicrosoftRewardsBot } from '../../../index'
+import { sampleProcessMemory } from '../../../util/ProcessMemory'
 
-const REFRESH_EVERY = 10
+const HARD_RECYCLE_EVERY = 5
+const MEMORY_RECYCLE_THRESHOLD_MB = 360
 const MAX_QUERY_ATTEMPTS = 5
 
 const POINTS_MAX_SEARCHES = 100
@@ -28,8 +30,10 @@ export class Search extends BaseActivity {
     private searchCount = 0
 
     public async doSearch(page: Page, isMobile: boolean): Promise<number> {
+        this.searchCount = 0
         const startBalance = Number(this.bot.userData.currentPoints ?? 0)
         this.bot.logger.info(isMobile, 'SEARCH-BING', `Starting Bing searches | currentBalance=${startBalance}`)
+        this.logMemory(isMobile, 'search-start')
 
         const tracker = new PointsTracker(this.bot, isMobile)
         try {
@@ -48,6 +52,7 @@ export class Search extends BaseActivity {
                 tracker.context,
                 `Completed Bing searches | pointsGained=${stats.totalGained} | currentBalance=${this.bot.userData.currentPoints} | previousBalance=${startBalance} | searches=${stats.performed} | ${tracker.progress()}`
             )
+            this.logMemory(isMobile, 'search-finish')
             return stats.totalGained
         } finally {
             await page.goto(URLs.bing.origin).catch(() => {})
@@ -56,6 +61,7 @@ export class Search extends BaseActivity {
 
     public async doBonusSearches(page: Page): Promise<number> {
         const isMobile = this.bot.isMobile
+        this.searchCount = 0
         const tracker = new BonusTracker(this.bot, isMobile)
 
         const stats = await this.runSearchSession(page, isMobile, tracker)
@@ -137,6 +143,16 @@ export class Search extends BaseActivity {
                         `no points ${stats.stagnant}/${tracker.stagnantLimit} | query="${query}" | ${tracker.progress()}`
                     )
                 }
+
+                const memory = sampleProcessMemory()
+                if (memory.treeRssMb >= MEMORY_RECYCLE_THRESHOLD_MB) {
+                    this.bot.logger.warn(
+                        isMobile,
+                        'MEMORY',
+                        `High browser-process memory during Bing searches | treeRssMb=${memory.treeRssMb.toFixed(1)} | nodeRssMb=${memory.nodeRssMb.toFixed(1)} | processes=${memory.processCount} | thresholdMb=${MEMORY_RECYCLE_THRESHOLD_MB}`
+                    )
+                    await this.hardRecyclePage(page, isMobile, 'memory-pressure')
+                }
             }
 
             return stats
@@ -149,13 +165,12 @@ export class Search extends BaseActivity {
             return stats
         }
     }
+
     private async bingSearch(page: Page, query: string, isMobile: boolean): Promise<void> {
         this.searchCount++
 
-        if (this.searchCount % REFRESH_EVERY === 0) {
-            await page.goto(URLs.bing.origin)
-            await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
-            await this.bot.browser.utils.tryDismissAllMessages(page)
+        if (this.searchCount % HARD_RECYCLE_EVERY === 0) {
+            await this.hardRecyclePage(page, isMobile, `periodic-${this.searchCount}`)
         }
 
         for (let attempt = 1; attempt <= MAX_QUERY_ATTEMPTS; attempt++) {
@@ -200,6 +215,41 @@ export class Search extends BaseActivity {
                 await this.bot.utils.wait(2000)
             }
         }
+    }
+
+    private async hardRecyclePage(page: Page, isMobile: boolean, reason: string): Promise<void> {
+        const before = sampleProcessMemory()
+        this.bot.logger.info(
+            isMobile,
+            'MEMORY',
+            `Recycling Bing page | reason=${reason} | treeRssMb=${before.treeRssMb.toFixed(1)} | nodeRssMb=${before.nodeRssMb.toFixed(1)} | processes=${before.processCount}`
+        )
+
+        for (const extraPage of page.context().pages()) {
+            if (extraPage !== page) await extraPage.close().catch(() => {})
+        }
+
+        await page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {})
+        await this.bot.utils.wait(250)
+        await page.goto(URLs.bing.origin, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
+        await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
+        await this.bot.browser.utils.tryDismissAllMessages(page)
+
+        const after = sampleProcessMemory()
+        this.bot.logger.info(
+            isMobile,
+            'MEMORY',
+            `Bing page recycled | reason=${reason} | treeRssMb=${after.treeRssMb.toFixed(1)} | nodeRssMb=${after.nodeRssMb.toFixed(1)} | processes=${after.processCount}`
+        )
+    }
+
+    private logMemory(isMobile: boolean, phase: string): void {
+        const memory = sampleProcessMemory()
+        this.bot.logger.info(
+            isMobile,
+            'MEMORY',
+            `Process memory | phase=${phase} | treeRssMb=${memory.treeRssMb.toFixed(1)} | nodeRssMb=${memory.nodeRssMb.toFixed(1)} | processes=${memory.processCount}`
+        )
     }
 
     private async randomScroll(page: Page, isMobile: boolean) {
