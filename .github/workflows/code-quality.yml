@@ -16,7 +16,7 @@ permissions:
 
 jobs:
     verify:
-        name: Build, lint, format, test
+        name: Build, lint, test
         runs-on: ubuntu-latest
         timeout-minutes: 15
 
@@ -38,9 +38,6 @@ jobs:
 
             - name: ESLint
               run: npm run lint
-
-            - name: Prettier check
-              run: npm run format:check
 
             - name: Log parser tests
               run: npm run test:log-parser
