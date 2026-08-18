@@ -128,15 +128,14 @@ export class Logger {
             consoleOut(level, consoleStr, getColorFn(logColor))
         }
 
-        if (!webhookAllowed) {
-            return
-        }
-
         if (cluster.isPrimary) {
-            if (config.webhook.discord?.enabled && config.webhook.discord.url) {
-                if (level === 'debug') return
-                sendDiscord(config.webhook.discord.url, cleanMsg, level)
+            // Discord has its own summary/standard/verbose routing. It receives the
+            // generic webhook-filter decision as an optional compatibility gate.
+            if (config.webhook.discord?.enabled && config.webhook.discord.url && level !== 'debug') {
+                void sendDiscord(config.webhook.discord, cleanMsg, level, webhookAllowed)
             }
+
+            if (!webhookAllowed) return
 
             if (config.webhook.ntfy?.enabled && config.webhook.ntfy.url) {
                 if (level === 'debug') return
@@ -151,7 +150,7 @@ export class Logger {
                 if (level === 'debug') return
                 sendTelegram(config.webhook.telegram, cleanMsg, level)
             }
-        } else {
+        } else if (webhookAllowed) {
             process.send?.({ __ipcLog: { content: cleanMsg, level } })
         }
     }
