@@ -5,6 +5,8 @@ import { URLs } from '../../../constants/urls'
 
 import type { BasePromotion } from '../../../interface/DashboardData'
 
+const SEARCH_BOX_SELECTOR = '#sb_form_q, input[name="q"], textarea[name="q"], [role="searchbox"]'
+
 export class SearchOnBing extends BaseActivity {
     private gainedPoints = 0
     private success = false
@@ -144,28 +146,50 @@ export class SearchOnBing extends BaseActivity {
         )
     }
 
-    private async ensureSearchReady(page: Page) {
-        const searchBox = page.locator('#sb_form_q')
-        if (await searchBox.isVisible().catch(() => false)) return
+    private async ensureSearchReady(page: Page): Promise<boolean> {
+        const searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
+        if (await searchBox.isVisible().catch(() => false)) return true
 
-        await page.goto(URLs.bing.origin)
-        await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
+        await page.goto(URLs.bing.origin, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {})
         await this.bot.browser.utils.tryDismissAllMessages(page)
+
+        return await searchBox.isVisible().catch(() => false)
+    }
+
+    private async navigateSearchFallback(page: Page, query: string): Promise<void> {
+        const searchUrl = `${URLs.bing.origin}/search?q=${encodeURIComponent(query)}`
+        this.bot.logger.warn(
+            this.bot.isMobile,
+            'SEARCH-ON-BING-SEARCH',
+            `Bing search box unavailable; using search URL fallback | currentUrl=${page.url()}`
+        )
+
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 })
     }
 
     private async typeSearch(page: Page, query: string) {
-        await this.ensureSearchReady(page)
+        const searchReady = await this.ensureSearchReady(page)
+        if (!searchReady) {
+            await this.navigateSearchFallback(page, query)
+            return
+        }
 
-        const selector = '#sb_form_q'
-        const searchBox = page.locator(selector)
-        await searchBox.waitFor({ state: 'visible', timeout: 15000 })
+        const searchBox = page.locator(SEARCH_BOX_SELECTOR).first()
 
-        await this.bot.utils.wait(500)
-        await this.bot.browser.utils.ghostClick(page, selector, { clickCount: 3 })
-        await searchBox.fill('')
+        try {
+            await searchBox.waitFor({ state: 'visible', timeout: 5000 })
+            await this.bot.utils.wait(500)
 
-        await page.keyboard.type(query, { delay: this.bot.utils.randomDelay(45, 90) })
-        await page.keyboard.press('Enter')
-        await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
+            await searchBox.fill(query)
+            await searchBox.press('Enter')
+            await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
+        } catch (error) {
+            this.bot.logger.warn(
+                this.bot.isMobile,
+                'SEARCH-ON-BING-SEARCH',
+                `Search box interaction failed; using URL fallback | message=${error instanceof Error ? error.message : String(error)}`
+            )
+            await this.navigateSearchFallback(page, query)
+        }
     }
 }
