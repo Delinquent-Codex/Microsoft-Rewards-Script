@@ -151,21 +151,23 @@ jobs:
                       """                const stats = await this.runTasks(chunk, runStartTime ?? runStartTimeFromMaster ?? Date.now())
 
                                       if (process.send) {
-                                          process.send({ __stats: stats })
-                                      }
-
-                                      await flushAllWebhooks()
-                                      process.exit(0)
                   """,
                       """                const stats = await this.runTasks(chunk, runStartTime ?? runStartTimeFromMaster ?? Date.now())
                                       const hadAccountFailure = stats.some(stat => !stat.success)
 
                                       if (process.send) {
-                                          process.send({ __stats: stats })
-                                      }
+                  """
+                  )
 
-                                      await flushAllWebhooks()
+                  replace_once(
+                      index_file,
+                      """                await flushAllWebhooks()
+                                      process.exit(0)
+                                  } catch (error) {
+                  """,
+                      """                await flushAllWebhooks()
                                       process.exit(hadAccountFailure ? 1 : 0)
+                                  } catch (error) {
                   """
                   )
 
@@ -186,7 +188,6 @@ jobs:
                   )
                   PY
 
-                  # Restore the permanent workflow from the parent commit in the same source-fix commit.
                   git show HEAD^:.github/workflows/code-quality.yml > .github/workflows/code-quality.yml
 
             - name: Install dependencies
