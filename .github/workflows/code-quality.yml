@@ -1,28 +1,28 @@
 name: Code Quality
 
 on:
+    push:
+        branches: ['v4']
     pull_request:
         branches: ['v4']
+    workflow_dispatch:
 
 concurrency:
-    group: code-quality-bootstrap-fix
+    group: code-quality-${{ github.ref }}
     cancel-in-progress: true
 
 permissions:
-    contents: write
+    contents: read
 
 jobs:
     verify:
-        name: Apply bootstrap fixes, build, lint, test
+        name: Build, lint, test
         runs-on: ubuntu-latest
         timeout-minutes: 15
 
         steps:
-            - name: Check out production v4
+            - name: Check out repository
               uses: actions/checkout@v4
-              with:
-                  ref: v4
-                  fetch-depth: 5
 
             - name: Set up Node.js 24
               uses: actions/setup-node@v4
@@ -30,155 +30,8 @@ jobs:
                   node-version: 24
                   cache: npm
 
-            - name: Apply Rewards bootstrap and failure-exit fixes
-              shell: bash
-              run: |
-                  python3 <<'PY'
-                  from pathlib import Path
-                  import re
-
-                  def replace_once(path: str, old: str, new: str) -> None:
-                      file = Path(path)
-                      text = file.read_text()
-                      count = text.count(old)
-                      if count != 1:
-                          raise SystemExit(f'{path}: expected exactly one target, found {count}')
-                      file.write_text(text.replace(old, new, 1))
-
-                  def regex_once(path: str, pattern: str, replacement: str) -> None:
-                      file = Path(path)
-                      text = file.read_text()
-                      updated, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE | re.DOTALL)
-                      if count != 1:
-                          raise SystemExit(f'{path}: expected exactly one regex target, found {count}')
-                      file.write_text(updated)
-
-                  browser_func = 'src/browser/BrowserFunc.ts'
-                  replace_once(
-                      browser_func,
-                      """        } catch (error) {
-                              throw this.bot.logger.error(
-                                  this.bot.isMobile,
-                                  'GET-DASHBOARD-DATA',
-                                  `Failed to get dashboard data: ${error instanceof Error ? error.message : String(error)}`
-                              )
-                          }
-                  """,
-                      """        } catch (error) {
-                              this.bot.logger.error(
-                                  this.bot.isMobile,
-                                  'GET-DASHBOARD-DATA',
-                                  `Failed to get dashboard data: ${error instanceof Error ? error.message : String(error)}`
-                              )
-                              throw error instanceof Error ? error : new Error(String(error))
-                          }
-                  """
-                  )
-
-                  replace_once(
-                      browser_func,
-                      """            // /earn is the offers page
-                              await page.goto(URLs.rewards.earn, { waitUntil: 'domcontentloaded' })
-
-                              const earnDom = await page.content()
-                              const earnRaw = await this.fetchBootstrapHtml(page, URLs.rewards.earn, '/earn')
-                  """,
-                      """            // /earn is the offers page
-                              await page.goto(URLs.rewards.earn, { waitUntil: 'domcontentloaded' })
-
-                              const earnDom = await this.capturePageContent(page, '/earn')
-                              const earnRaw = await this.fetchBootstrapHtml(page, URLs.rewards.earn, '/earn')
-                  """
-                  )
-
-                  replace_once(
-                      browser_func,
-                      """    private async fetchBootstrapHtml(page: Page, url: string, route: string): Promise<string> {
-                  """,
-                      """    private async capturePageContent(page: Page, route: string, maxAttempts = 4): Promise<string> {
-                          let lastError: unknown
-
-                          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                              try {
-                                  await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
-                                  await this.bot.utils.wait(300)
-                                  return await page.content()
-                              } catch (error) {
-                                  lastError = error
-
-                                  if (page.isClosed() || isBrowserClosedError(error)) {
-                                      throw error
-                                  }
-
-                                  if (attempt < maxAttempts) {
-                                      this.bot.logger.warn(
-                                          this.bot.isMobile,
-                                          'BOOTSTRAP',
-                                          `Rewards page still navigating; retrying content capture ${attempt}/${maxAttempts} | route=${route}`
-                                      )
-                                      await this.bot.utils.wait(500 * attempt)
-                                  }
-                              }
-                          }
-
-                          this.bot.logger.warn(
-                              this.bot.isMobile,
-                              'BOOTSTRAP',
-                              `Rewards DOM capture unavailable after ${maxAttempts} attempts | route=${route} | error=${lastError instanceof Error ? lastError.message : String(lastError)} | continuing with direct HTML fetch`
-                          )
-                          return ''
-                      }
-
-                      private async fetchBootstrapHtml(page: Page, url: string, route: string): Promise<string> {
-                  """
-                  )
-
-                  replace_once(
-                      'src/browser/auth/Login.ts',
-                      """        } catch (error) {
-                              throw this.bot.logger.error(
-                                  this.bot.isMobile,
-                                  'GET-REWARD-SESSION',
-                                  `Failed to acquire rewards context: ${error instanceof Error ? error.message : String(error)}`
-                              )
-                          }
-                  """,
-                      """        } catch (error) {
-                              this.bot.logger.error(
-                                  this.bot.isMobile,
-                                  'GET-REWARD-SESSION',
-                                  `Failed to acquire rewards context: ${error instanceof Error ? error.message : String(error)}`
-                              )
-                              throw error instanceof Error ? error : new Error(String(error))
-                          }
-                  """
-                  )
-
-                  index_file = 'src/index.ts'
-                  regex_once(
-                      index_file,
-                      r"(const stats = await this\.runTasks\(chunk,\s*runStartTime \?\? runStartTimeFromMaster \?\? Date\.now\(\)\)\s*)(if \(process\.send\) \{)",
-                      r"\1const hadAccountFailure = stats.some(stat => !stat.success)\n\n                \2"
-                  )
-                  regex_once(
-                      index_file,
-                      r"(const hadAccountFailure = stats\.some\(stat => !stat\.success\)[\s\S]*?await flushAllWebhooks\(\)\s*)process\.exit\(0\)(\s*\} catch \(error\) \{)",
-                      r"\1process.exit(hadAccountFailure ? 1 : 0)\2"
-                  )
-                  regex_once(
-                      index_file,
-                      r"(if \(this\.config\.clusters <= 1 && cluster\.isPrimary\) \{[\s\S]*?await flushAllWebhooks\(\)\s*)process\.exit\(0\)",
-                      r"\1process.exit(accountStats.some(stat => !stat.success) ? 1 : 0)"
-                  )
-                  PY
-
-                  git show 37e72cfe878d7f2e2fb55c55b6dbc6654f6fb1ab:.github/workflows/code-quality.yml > .github/workflows/code-quality.yml
-
             - name: Install dependencies
               run: npm ci --ignore-scripts
-
-            - name: Format source
-              run: npm run format
 
             - name: TypeScript build
               run: npm run build
@@ -188,12 +41,3 @@ jobs:
 
             - name: Log parser tests
               run: npm run test:log-parser
-
-            - name: Commit verified fixes to v4
-              shell: bash
-              run: |
-                  git config user.name 'github-actions[bot]'
-                  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-                  git add -A
-                  git commit -m 'Fix Rewards bootstrap navigation races and failure exits'
-                  git push origin HEAD:v4

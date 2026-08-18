@@ -44,11 +44,12 @@ export default class BrowserFunc {
             if (response.data) return response.data
             throw new Error('Dashboard data missing from API response')
         } catch (error) {
-            throw this.bot.logger.error(
+            this.bot.logger.error(
                 this.bot.isMobile,
                 'GET-DASHBOARD-DATA',
                 `Failed to get dashboard data: ${error instanceof Error ? error.message : String(error)}`
             )
+            throw error instanceof Error ? error : new Error(String(error))
         }
     }
 
@@ -211,7 +212,7 @@ export default class BrowserFunc {
             // /earn is the offers page
             await page.goto(URLs.rewards.earn, { waitUntil: 'domcontentloaded' })
 
-            const earnDom = await page.content()
+            const earnDom = await this.capturePageContent(page, '/earn')
             const earnRaw = await this.fetchBootstrapHtml(page, URLs.rewards.earn, '/earn')
 
             this.rewardsDeploymentId = this.bot.browser.react.buildId(earnRaw || earnDom) ?? ''
@@ -273,6 +274,40 @@ export default class BrowserFunc {
             )
             throw error
         }
+    }
+
+    private async capturePageContent(page: Page, route: string, maxAttempts = 4): Promise<string> {
+        let lastError: unknown
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {})
+                await this.bot.utils.wait(300)
+                return await page.content()
+            } catch (error) {
+                lastError = error
+
+                if (page.isClosed() || isBrowserClosedError(error)) {
+                    throw error
+                }
+
+                if (attempt < maxAttempts) {
+                    this.bot.logger.warn(
+                        this.bot.isMobile,
+                        'BOOTSTRAP',
+                        `Rewards page still navigating; retrying content capture ${attempt}/${maxAttempts} | route=${route}`
+                    )
+                    await this.bot.utils.wait(500 * attempt)
+                }
+            }
+        }
+
+        this.bot.logger.warn(
+            this.bot.isMobile,
+            'BOOTSTRAP',
+            `Rewards DOM capture unavailable after ${maxAttempts} attempts | route=${route} | error=${lastError instanceof Error ? lastError.message : String(lastError)} | continuing with direct HTML fetch`
+        )
+        return ''
     }
 
     private async fetchBootstrapHtml(page: Page, url: string, route: string): Promise<string> {

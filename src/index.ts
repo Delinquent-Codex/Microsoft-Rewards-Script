@@ -384,12 +384,14 @@ export class MicrosoftRewardsBot {
             try {
                 const stats = await this.runTasks(chunk, runStartTime ?? runStartTimeFromMaster ?? Date.now())
 
+                const hadAccountFailure = stats.some(stat => !stat.success)
+
                 if (process.send) {
                     process.send({ __stats: stats })
                 }
 
                 await flushAllWebhooks()
-                process.exit(0)
+                process.exit(hadAccountFailure ? 1 : 0)
             } catch (error) {
                 this.logger.error(
                     'main',
@@ -513,7 +515,7 @@ export class MicrosoftRewardsBot {
             )
 
             await flushAllWebhooks()
-            process.exit(0)
+            process.exit(accountStats.some(stat => !stat.success) ? 1 : 0)
         }
 
         return accountStats
