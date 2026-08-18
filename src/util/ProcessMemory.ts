@@ -63,10 +63,7 @@ function cgroupMemory(): Pick<
         '/sys/fs/cgroup/memory.current',
         '/sys/fs/cgroup/memory/memory.usage_in_bytes'
     ])
-    const rawLimitBytes = readCgroupValue([
-        '/sys/fs/cgroup/memory.max',
-        '/sys/fs/cgroup/memory/memory.limit_in_bytes'
-    ])
+    const rawLimitBytes = readCgroupValue(['/sys/fs/cgroup/memory.max', '/sys/fs/cgroup/memory/memory.limit_in_bytes'])
     const limitBytes = rawLimitBytes !== null && rawLimitBytes < UNLIMITED_CGROUP_BYTES ? rawLimitBytes : null
 
     const containerCurrentMb = currentBytes === null ? null : Number(currentBytes) / BYTES_PER_MB
