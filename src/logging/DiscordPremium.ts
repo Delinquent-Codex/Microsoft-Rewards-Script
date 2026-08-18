@@ -148,13 +148,19 @@ function displayAccount(account: string, shouldMask: boolean): string {
 
 function sanitizeText(text: string, maskAccounts = true): string {
     let out = text
-        .replace(/https?:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/[^\s)]+/gi, '[Discord webhook redacted]')
+        .replace(
+            /https?:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/[^\s)]+/gi,
+            '[Discord webhook redacted]'
+        )
         .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
         .replace(
             /([?&](?:access_token|refresh_token|id_token|token|secret|code|assertion|session|auth)=)[^&#\s]+/gi,
             '$1[redacted]'
         )
-        .replace(/((?:access_token|refresh_token|id_token|token|secret|assertion)\s*[=:]\s*)[^|,;\s]+/gi, '$1[redacted]')
+        .replace(
+            /((?:access_token|refresh_token|id_token|token|secret|assertion)\s*[=:]\s*)[^|,;\s]+/gi,
+            '$1[redacted]'
+        )
 
     if (maskAccounts) {
         out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, value => maskIdentifier(value))
@@ -303,7 +309,8 @@ function shouldTrackEvent(parsed: ParsedLog): boolean {
 
 function isSignificantWarning(parsed: ParsedLog): boolean {
     const text = parsed.message.toLowerCase()
-    if (parsed.event === 'SEARCH-ON-BING-SEARCH' && text.includes('skipping incompatible searchonbing offer')) return false
+    if (parsed.event === 'SEARCH-ON-BING-SEARCH' && text.includes('skipping incompatible searchonbing offer'))
+        return false
     if (parsed.event === 'SEARCH-ON-BING' && text.includes('failed searchonbing')) {
         const offerId = metric(parsed.message, 'offerId')
         if (offerId && skippedOfferIds.has(offerId)) return false
@@ -335,19 +342,24 @@ function trackRun(parsed: ParsedLog | null, fallbackLevel: LogLevel): void {
 
     switch (parsed.event) {
         case 'URL-REWARD':
-            if (parsed.message.startsWith('Completed')) runTotals.urlActivities += numberMetric(parsed.message, 'pointsGained')
+            if (parsed.message.startsWith('Completed'))
+                runTotals.urlActivities += numberMetric(parsed.message, 'pointsGained')
             break
         case 'APP-REWARD':
-            if (parsed.message.startsWith('Completed')) runTotals.appRewards += numberMetric(parsed.message, 'pointsGained')
+            if (parsed.message.startsWith('Completed'))
+                runTotals.appRewards += numberMetric(parsed.message, 'pointsGained')
             break
         case 'READ-TO-EARN':
-            if (parsed.message.startsWith('Completed')) runTotals.readToEarn += numberMetric(parsed.message, 'pointsGained')
+            if (parsed.message.startsWith('Completed'))
+                runTotals.readToEarn += numberMetric(parsed.message, 'pointsGained')
             break
         case 'PUNCHCARD':
-            if (/\bCOMPLETE\b/.test(parsed.message)) runTotals.punchcards += numberMetric(parsed.message, 'pointsGained')
+            if (/\bCOMPLETE\b/.test(parsed.message))
+                runTotals.punchcards += numberMetric(parsed.message, 'pointsGained')
             break
         case 'DAILY-CHECK-IN':
-            if (parsed.message.startsWith('Completed')) runTotals.checkIn += numberMetric(parsed.message, 'pointsGained')
+            if (parsed.message.startsWith('Completed'))
+                runTotals.checkIn += numberMetric(parsed.message, 'pointsGained')
             break
         case 'CLAIM-BONUS-POINTS':
             if (parsed.message.startsWith('Completed')) runTotals.bonus += numberMetric(parsed.message, 'pointsGained')
@@ -503,7 +515,8 @@ function buildPremiumEmbed(
 ): DiscordEmbed {
     if (!parsed) {
         const embed: DiscordEmbed = {
-            title: level === 'error' ? '🚨 Rewards Error' : level === 'warn' ? '⚠️ Rewards Warning' : 'ℹ️ Rewards Update',
+            title:
+                level === 'error' ? '🚨 Rewards Error' : level === 'warn' ? '⚠️ Rewards Warning' : 'ℹ️ Rewards Update',
             description: sanitizeText(content, settings.maskAccount),
             color: level === 'error' ? COLORS.error : level === 'warn' ? COLORS.warning : COLORS.info,
             author: baseAuthor(settings)
@@ -518,7 +531,8 @@ function buildPremiumEmbed(
     const account = displayAccount(parsed.account, settings.maskAccount)
 
     if (parsed.account !== 'MAIN') addField(fields, '👤 Account', account)
-    if (parsed.platform !== 'MAIN') addField(fields, '🖥️ Platform', parsed.platform === 'MOBILE' ? '📱 Mobile' : '🖥️ Desktop')
+    if (parsed.platform !== 'MAIN')
+        addField(fields, '🖥️ Platform', parsed.platform === 'MOBILE' ? '📱 Mobile' : '🖥️ Desktop')
 
     if (parsed.level === 'error') {
         addField(fields, '🛡️ Run health', '🔴 **Error detected**\nThis event needs attention.', false)
@@ -572,7 +586,12 @@ function buildPremiumEmbed(
             addField(fields, '📱 Mobile', `**${formatPoints(mobile)} pts**\n${progressBar(mobile, total, 7)}`)
             addField(fields, '🖥️ Browser', `**${formatPoints(browser)} pts**\n${progressBar(browser, total, 7)}`)
             addField(fields, '📲 App', `**${formatPoints(app)} pts**\n${progressBar(app, total, 7)}`)
-            addField(fields, '💎 Detected potential', `**${formatPoints(total)} points** across the reported search/app earning buckets.`, false)
+            addField(
+                fields,
+                '💎 Detected potential',
+                `**${formatPoints(total)} points** across the reported search/app earning buckets.`,
+                false
+            )
             return commonEmbed(
                 settings,
                 parsed,
@@ -585,24 +604,52 @@ function buildPremiumEmbed(
         case 'DAILY-SET': {
             addField(fields, '✅ Status', 'Complete')
             addField(fields, '📍 Stage', 'Daily Set')
-            return commonEmbed(settings, parsed, '✅ Daily Set Complete', 'The Daily Set stage is finished.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                '✅ Daily Set Complete',
+                'The Daily Set stage is finished.',
+                COLORS.success,
+                fields
+            )
         }
         case 'MORE-PROMOTIONS': {
             addField(fields, '✅ Status', 'Complete')
             addField(fields, '📍 Stage', 'More Promotions')
-            return commonEmbed(settings, parsed, '✨ More Promotions Complete', 'Available More Promotions activities have been processed.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                '✨ More Promotions Complete',
+                'Available More Promotions activities have been processed.',
+                COLORS.success,
+                fields
+            )
         }
         case 'DAILY-CHECK-IN': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(settings, parsed, `📅 Daily Check-In • +${formatPoints(gained)} pts`, 'Daily check-in completed successfully.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `📅 Daily Check-In • +${formatPoints(gained)} pts`,
+                'Daily check-in completed successfully.',
+                COLORS.success,
+                fields
+            )
         }
         case 'APP-PROMOTIONS': {
             addField(fields, '✅ Status', 'Complete')
             addField(fields, '📍 Stage', 'App Promotions')
-            return commonEmbed(settings, parsed, '📱 App Promotions Complete', 'Available app promotion activities have been processed.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                '📱 App Promotions Complete',
+                'Available app promotion activities have been processed.',
+                COLORS.success,
+                fields
+            )
         }
         case 'READ-TO-EARN': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
@@ -612,7 +659,14 @@ function buildPremiumEmbed(
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
             addField(fields, '📈 Completion', `${progressBar(articles, Math.max(articles, 1), 10)}  **100%**`, false)
-            return commonEmbed(settings, parsed, `📰 Read to Earn Complete • +${formatPoints(gained)} pts`, 'All reported Read to Earn articles were processed successfully.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `📰 Read to Earn Complete • +${formatPoints(gained)} pts`,
+                'All reported Read to Earn articles were processed successfully.',
+                COLORS.success,
+                fields
+            )
         }
         case 'PUNCHCARD': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
@@ -623,7 +677,14 @@ function buildPremiumEmbed(
             addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
             if (target > 0) addField(fields, '🏁 Target', `${formatPoints(target)} pts`)
-            return commonEmbed(settings, parsed, `🎯 Punchcard Complete${gained > 0 ? ` • +${formatPoints(gained)} pts` : ''}`, 'A Rewards quest/punchcard reached its completed state.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `🎯 Punchcard Complete${gained > 0 ? ` • +${formatPoints(gained)} pts` : ''}`,
+                'A Rewards quest/punchcard reached its completed state.',
+                COLORS.success,
+                fields
+            )
         }
         case 'SEARCH-MANAGER': {
             const mobile = numberMetric(cleanMessage, 'mobile')
@@ -633,22 +694,48 @@ function buildPremiumEmbed(
             addField(fields, '📱 Mobile', `**+${formatPoints(mobile)}**`)
             addField(fields, '🖥️ Desktop', `**+${formatPoints(desktop)}**`)
             addField(fields, '✨ Bonus', `**+${formatPoints(bonus)}**`)
-            addField(fields, '🔎 Search total', `**+${formatPoints(total)} points**\n${progressBar(total, Math.max(total, 1), 10)}`, false)
-            return commonEmbed(settings, parsed, `🔎 Search Phase Complete • +${formatPoints(total)} pts`, 'Search earning is complete for this account.', COLORS.search, fields)
+            addField(
+                fields,
+                '🔎 Search total',
+                `**+${formatPoints(total)} points**\n${progressBar(total, Math.max(total, 1), 10)}`,
+                false
+            )
+            return commonEmbed(
+                settings,
+                parsed,
+                `🔎 Search Phase Complete • +${formatPoints(total)} pts`,
+                'Search earning is complete for this account.',
+                COLORS.search,
+                fields
+            )
         }
         case 'CLAIM-BONUS-POINTS': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '🎁 Claimed', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(settings, parsed, `🎁 Bonus Claimed • +${formatPoints(gained)} pts`, 'Available bonus points were claimed successfully.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `🎁 Bonus Claimed • +${formatPoints(gained)} pts`,
+                'Available bonus points were claimed successfully.',
+                COLORS.success,
+                fields
+            )
         }
         case 'FLOW': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
             const balance = numberMetric(cleanMessage, 'currentBalance')
             addField(fields, '💎 Account earnings', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Current balance', `**${formatPoints(balance)} pts**`)
-            return commonEmbed(settings, parsed, `📊 Account Earnings • +${formatPoints(gained)} pts`, 'Foreground earning activities for this account are complete.', COLORS.activity, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `📊 Account Earnings • +${formatPoints(gained)} pts`,
+                'Foreground earning activities for this account are complete.',
+                COLORS.activity,
+                fields
+            )
         }
         case 'ACCOUNT-END': {
             const gained = numberMetric(cleanMessage, 'pointsGained')
@@ -656,12 +743,23 @@ function buildPremiumEmbed(
             const current = numberMetric(cleanMessage, 'currentBalance')
             const duration = numberMetric(cleanMessage, 'durationSeconds')
             const rate = duration > 0 ? gained / (duration / 60) : 0
-            addField(fields, '💎 Earned', `**+${formatPoints(gained)} pts**\n${progressBar(gained, Math.max(gained, 1), 8)}`)
+            addField(
+                fields,
+                '💎 Earned',
+                `**+${formatPoints(gained)} pts**\n${progressBar(gained, Math.max(gained, 1), 8)}`
+            )
             addField(fields, '🏦 Balance', `${formatPoints(previous)} → **${formatPoints(current)}**`)
             addField(fields, '⏱️ Runtime', `**${formatDurationSeconds(duration)}**`)
             if (rate > 0) addField(fields, '⚡ Efficiency', `**${rate.toFixed(1)} pts/min**`)
             addField(fields, '✅ Result', '**SUCCESS**\nAccount completed cleanly.', false)
-            return commonEmbed(settings, parsed, `✅ Account Complete • +${formatPoints(gained)} pts`, 'This account finished successfully and its final balance was recorded.', COLORS.success, fields)
+            return commonEmbed(
+                settings,
+                parsed,
+                `✅ Account Complete • +${formatPoints(gained)} pts`,
+                'This account finished successfully and its final balance was recorded.',
+                COLORS.success,
+                fields
+            )
         }
         case 'RUN-END': {
             const accounts = numberMetric(cleanMessage, 'accountsProcessed')
@@ -675,7 +773,11 @@ function buildPremiumEmbed(
             addField(fields, '💎 Total earned', `**+${formatPoints(gained)} pts**`)
             addField(fields, '🏦 Balance', `${formatPoints(previous)} → **${formatPoints(current)}**`)
             addField(fields, '⏱️ Runtime', `**${formatRuntimeMinutes(runtimeMinutes)}**`)
-            addField(fields, '👥 Accounts', `**${Math.round(accounts)} processed**\n${runTotals.accountsCompleted} completed`)
+            addField(
+                fields,
+                '👥 Accounts',
+                `**${Math.round(accounts)} processed**\n${runTotals.accountsCompleted} completed`
+            )
             if (rate > 0) addField(fields, '⚡ Efficiency', `**${rate.toFixed(1)} pts/min**`)
             addField(fields, '📊 Earnings breakdown', earningRows(gained), false)
             addField(
@@ -691,8 +793,12 @@ function buildPremiumEmbed(
             return commonEmbed(
                 settings,
                 parsed,
-                healthy ? `🏆 Rewards Run Complete • +${formatPoints(gained)} pts` : `⚠️ Rewards Run Complete with Issues • +${formatPoints(gained)} pts`,
-                healthy ? '**SUCCESS** — All configured accounts finished and the run closed cleanly.' : '**COMPLETED** — The run reached the end, but some noteworthy issues were observed.',
+                healthy
+                    ? `🏆 Rewards Run Complete • +${formatPoints(gained)} pts`
+                    : `⚠️ Rewards Run Complete with Issues • +${formatPoints(gained)} pts`,
+                healthy
+                    ? '**SUCCESS** — All configured accounts finished and the run closed cleanly.'
+                    : '**COMPLETED** — The run reached the end, but some noteworthy issues were observed.',
                 healthy ? COLORS.success : COLORS.warning,
                 fields
             )
@@ -704,7 +810,14 @@ function buildPremiumEmbed(
                 addField(fields, '🎫 Offer', title || offerId, false)
                 if (offerId && title) addField(fields, '🆔 Offer ID', offerId, false)
                 addField(fields, '🛡️ Safety', 'Skipped without fabricating completion or offer progress.', false)
-                return commonEmbed(settings, parsed, '⏭️ Explore on Bing Offer Skipped Safely', 'Bing did not expose a compatible interactive search box, so the incompatible promotion was skipped.', COLORS.warning, fields)
+                return commonEmbed(
+                    settings,
+                    parsed,
+                    '⏭️ Explore on Bing Offer Skipped Safely',
+                    'Bing did not expose a compatible interactive search box, so the incompatible promotion was skipped.',
+                    COLORS.warning,
+                    fields
+                )
             }
             break
         }
@@ -713,7 +826,14 @@ function buildPremiumEmbed(
     }
 
     const title = parsed.level === 'warn' ? `⚠️ ${humanizeEvent(parsed.event)}` : `ℹ️ ${humanizeEvent(parsed.event)}`
-    return commonEmbed(settings, parsed, title, cleanMessage, parsed.level === 'warn' ? COLORS.warning : COLORS.info, fields)
+    return commonEmbed(
+        settings,
+        parsed,
+        title,
+        cleanMessage,
+        parsed.level === 'warn' ? COLORS.warning : COLORS.info,
+        fields
+    )
 }
 
 const SUMMARY_EVENTS = new Set(['RUN-START', 'ACCOUNT-END', 'RUN-END'])
@@ -744,7 +864,8 @@ function isStandardMilestone(parsed: ParsedLog): boolean {
 
 function isImportantWarning(parsed: ParsedLog): boolean {
     return (
-        (parsed.event === 'SEARCH-ON-BING-SEARCH' && parsed.message.includes('Skipping incompatible SearchOnBing offer')) ||
+        (parsed.event === 'SEARCH-ON-BING-SEARCH' &&
+            parsed.message.includes('Skipping incompatible SearchOnBing offer')) ||
         isSignificantWarning(parsed)
     )
 }

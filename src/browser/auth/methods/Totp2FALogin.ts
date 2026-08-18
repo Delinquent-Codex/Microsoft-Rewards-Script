@@ -6,8 +6,7 @@ import { canPromptForInput, getErrorMessage, promptInput } from './LoginUtils'
 export class TotpLogin {
     private readonly textInputSelector =
         'form[name="OneTimeCodeViewForm"] input[type="text"], input#floatingLabelInput5, input#iOttText'
-    private readonly secondairyInputSelector =
-        'input[id="otc-confirmation-input"], input[name="otc"], input#iOttText'
+    private readonly secondairyInputSelector = 'input[id="otc-confirmation-input"], input[name="otc"], input#iOttText'
     private readonly submitButtonSelector = 'button[type="submit"], input[type="submit"], input#iVerifyCodeAction'
     private readonly maxManualSeconds = 60
     private readonly maxManualAttempts = 5

@@ -65,15 +65,15 @@ Sends nearly every non-debug log line as a structured Discord embed. Use this on
 
 ## Optional settings
 
-| Environment variable | Default | Purpose |
-| --- | --- | --- |
-| `CONFIG_DISCORD_MODE` | `standard` | `summary`, `standard`, or `verbose` |
-| `CONFIG_DISCORD_USERNAME` | `Microsoft Rewards` | Webhook display name |
-| `CONFIG_DISCORD_AVATAR_URL` | empty | Optional HTTP/HTTPS webhook avatar |
-| `CONFIG_DISCORD_DASHBOARD_URL` | empty | Optional dashboard link attached to embed titles |
-| `CONFIG_DISCORD_MASK_ACCOUNT` | `true` | Masks account email addresses in embeds and error text |
-| `CONFIG_DISCORD_INCLUDE_WARNINGS` | `false` | Includes selected warnings; verbose mode can include all warnings |
-| `CONFIG_DISCORD_RESPECT_WEBHOOK_FILTER` | `false` | If true, the generic webhook log filter is also required to pass |
+| Environment variable                    | Default             | Purpose                                                           |
+| --------------------------------------- | ------------------- | ----------------------------------------------------------------- |
+| `CONFIG_DISCORD_MODE`                   | `standard`          | `summary`, `standard`, or `verbose`                               |
+| `CONFIG_DISCORD_USERNAME`               | `Microsoft Rewards` | Webhook display name                                              |
+| `CONFIG_DISCORD_AVATAR_URL`             | empty               | Optional HTTP/HTTPS webhook avatar                                |
+| `CONFIG_DISCORD_DASHBOARD_URL`          | empty               | Optional dashboard link attached to embed titles                  |
+| `CONFIG_DISCORD_MASK_ACCOUNT`           | `true`              | Masks account email addresses in embeds and error text            |
+| `CONFIG_DISCORD_INCLUDE_WARNINGS`       | `false`             | Includes selected warnings; verbose mode can include all warnings |
+| `CONFIG_DISCORD_RESPECT_WEBHOOK_FILTER` | `false`             | If true, the generic webhook log filter is also required to pass  |
 
 These advanced settings are read directly from the process environment, which makes them suitable for Render environment variables without requiring config-file persistence.
 

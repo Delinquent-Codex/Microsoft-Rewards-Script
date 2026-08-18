@@ -67,7 +67,8 @@ export class Login {
         passwordIcon: '[data-testid="tile"]:has(svg path[d*="M11.78 10.22a.75.75"])',
         accountLocked: '#serviceAbuseLandingTitle',
         errorAlert: 'div[role="alert"]',
-        passwordEntry: 'input#passwordEntry, [data-testid="passwordEntry"] input[type="password"], input[type="password"]',
+        passwordEntry:
+            'input#passwordEntry, [data-testid="passwordEntry"] input[type="password"], input[type="password"]',
         emailEntry: 'input#usernameEntry, [data-testid="usernameEntry"] input[type="email"]',
         kmsiVideo: '[data-testid="kmsiVideo"]',
         passKeyVideo: '[data-testid="biometricVideo"]',
@@ -214,7 +215,7 @@ export class Login {
         const microsoftTotpInput = page.locator(this.selectors.totpInput).first()
         const hasMicrosoftTotpInput =
             (await microsoftTotpInput.isVisible().catch(() => false)) ||
-            ((await microsoftTotpInput.count().catch(() => 0)) > 0)
+            (await microsoftTotpInput.count().catch(() => 0)) > 0
 
         if (hasMicrosoftTotpInput) {
             this.bot.logger.debug(this.bot.isMobile, 'DETECT-STATE', 'Microsoft TOTP input detected via fallback')
@@ -227,14 +228,10 @@ export class Login {
         const microsoftPasswordInput = page.locator(this.selectors.passwordEntry).first()
         const hasMicrosoftPasswordInput =
             (await microsoftPasswordInput.isVisible().catch(() => false)) ||
-            ((await microsoftPasswordInput.count().catch(() => 0)) > 0)
+            (await microsoftPasswordInput.count().catch(() => 0)) > 0
 
         if (hasMicrosoftPasswordInput) {
-            this.bot.logger.debug(
-                this.bot.isMobile,
-                'DETECT-STATE',
-                'Microsoft password input detected via fallback'
-            )
+            this.bot.logger.debug(this.bot.isMobile, 'DETECT-STATE', 'Microsoft password input detected via fallback')
             return 'PASSWORD_INPUT'
         }
 
@@ -244,7 +241,7 @@ export class Login {
             const microsoftUsernameInput = page.locator(this.selectors.emailEntry).first()
             const hasMicrosoftUsernameInput =
                 (await microsoftUsernameInput.isVisible().catch(() => false)) ||
-                ((await microsoftUsernameInput.count().catch(() => 0)) > 0)
+                (await microsoftUsernameInput.count().catch(() => 0)) > 0
 
             if (hasMicrosoftUsernameInput) {
                 this.bot.logger.debug(
