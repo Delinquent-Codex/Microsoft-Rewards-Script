@@ -37,6 +37,6 @@ export async function sendDiscord(
     await sendDiscordPremium(config, content, level, webhookAllowed)
 }
 
-export function flushDiscordQueue(timeoutMs = 5000): Promise<void> {
+export function flushDiscordQueue(timeoutMs = 15_000): Promise<void> {
     return flushDiscordPremiumQueue(timeoutMs)
 }
