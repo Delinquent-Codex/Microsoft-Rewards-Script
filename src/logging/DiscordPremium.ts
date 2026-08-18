@@ -313,7 +313,7 @@ function isSignificantWarning(parsed: ParsedLog): boolean {
         return false
     if (parsed.event === 'SEARCH-ON-BING' && text.includes('failed searchonbing')) {
         const offerId = metric(parsed.message, 'offerId')
-        if (offerId && skippedOfferIds.has(offerId)) return false
+        if (offerId && skippedOfferIds.has(`${parsed.account}|${offerId}`)) return false
     }
     if (parsed.event === 'BROWSER' && text.includes('browser context closed')) return false
     return (
@@ -365,13 +365,13 @@ function trackRun(parsed: ParsedLog | null, fallbackLevel: LogLevel): void {
             if (parsed.message.startsWith('Completed')) runTotals.bonus += numberMetric(parsed.message, 'pointsGained')
             break
         case 'SEARCH-MANAGER':
-            if (parsed.message.startsWith('Search summary')) runTotals.search = numberMetric(parsed.message, 'total')
+            if (parsed.message.startsWith('Search summary')) runTotals.search += numberMetric(parsed.message, 'total')
             break
         case 'SEARCH-ON-BING-SEARCH':
             if (parsed.message.includes('Skipping incompatible SearchOnBing offer')) {
                 runTotals.skippedOffers += 1
                 const offerId = metric(parsed.message, 'offerId')
-                if (offerId) skippedOfferIds.add(offerId)
+                if (offerId) skippedOfferIds.add(`${parsed.account}|${offerId}`)
             }
             break
         case 'ACCOUNT-END':

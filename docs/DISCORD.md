@@ -54,7 +54,6 @@ Adds useful milestones without individual activity spam:
 - completed punchcards
 - search summary
 - bonus-points claim
-- account earnings summary
 - account completion
 - run completion
 - all errors
@@ -75,7 +74,7 @@ Sends nearly every non-debug log line as a structured Discord embed. Use this on
 | `CONFIG_DISCORD_INCLUDE_WARNINGS`       | `false`             | Includes selected warnings; verbose mode can include all warnings |
 | `CONFIG_DISCORD_RESPECT_WEBHOOK_FILTER` | `false`             | If true, the generic webhook log filter is also required to pass  |
 
-These advanced settings are read directly from the process environment, which makes them suitable for Render environment variables without requiring config-file persistence.
+These advanced settings are supported in `config.json` and by Docker/Render `CONFIG_*` environment overrides. Environment overrides are applied on container startup and take precedence over persisted config values.
 
 ## Privacy and safety
 

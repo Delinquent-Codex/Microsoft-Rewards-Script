@@ -62,7 +62,7 @@ export function getCurrentContext(): ExecutionContext {
     return context
 }
 
-async function flushAllWebhooks(timeoutMs = 5000): Promise<void> {
+async function flushAllWebhooks(timeoutMs = 15000): Promise<void> {
     await Promise.allSettled([flushDiscordQueue(timeoutMs), flushNtfyQueue(timeoutMs), flushTelegramQueue(timeoutMs)])
     closeSessionStore()
 }
@@ -303,11 +303,14 @@ export class MicrosoftRewardsBot {
                 const log = msg.__ipcLog
                 if (log && typeof log.content === 'string') {
                     const { webhook } = this.config
-                    const { content, level } = log
+                    const { content, level, webhookAllowed } = log
 
                     if (webhook.discord?.enabled && webhook.discord.url) {
-                        sendDiscord(webhook.discord.url, content, level)
+                        void sendDiscord(webhook.discord, content, level, webhookAllowed)
                     }
+
+                    if (!webhookAllowed) return
+
                     if (webhook.ntfy?.enabled && webhook.ntfy.url) {
                         sendNtfy(webhook.ntfy, content, level)
                     }

@@ -13,6 +13,7 @@ export type ColorKey = keyof typeof chalk
 export interface IpcLog {
     content: string
     level: LogLevel
+    webhookAllowed: boolean
 }
 
 type ChalkFn = (msg: string) => string
@@ -150,8 +151,11 @@ export class Logger {
                 if (level === 'debug') return
                 sendTelegram(config.webhook.telegram, cleanMsg, level)
             }
-        } else if (webhookAllowed) {
-            process.send?.({ __ipcLog: { content: cleanMsg, level } })
+        } else {
+            const discordEnabled = Boolean(config.webhook.discord?.enabled && config.webhook.discord.url)
+            if (level !== 'debug' && (discordEnabled || webhookAllowed)) {
+                process.send?.({ __ipcLog: { content: cleanMsg, level, webhookAllowed } })
+            }
         }
     }
 
