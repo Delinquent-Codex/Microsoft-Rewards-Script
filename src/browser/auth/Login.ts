@@ -199,6 +199,15 @@ export class Login {
             return 'LOGGED_IN'
         }
 
+        // Microsoft can interrupt a successful password sign-in with a passkey
+        // enrollment offer. Treat this URL as a passkey prompt so the existing
+        // PASSKEY handler uses the secondary button to skip enrollment instead
+        // of repeatedly pressing the primary action.
+        if (hostname === 'account.live.com' && url.pathname.startsWith('/interrupt/passkey/enroll')) {
+            this.bot.logger.debug(this.bot.isMobile, 'DETECT-STATE', 'Microsoft passkey enrollment page detected')
+            return 'PASSKEY_VIDEO'
+        }
+
         // Microsoft can use the older account.live.com confirm-identity page for
         // authenticator-code verification. Detect its TOTP field directly so
         // ACCOUNT_n_TOTP_SECRET can be used without interactive input.
@@ -347,7 +356,7 @@ export class Login {
             'EMAIL_VERIFICATION_INPUT',
             'RECOVERY_EMAIL_INPUT',
             'SIGN_IN_ANOTHER_WAY_PASSWORDLESS',
-            'SIGN_IN_ANOTHER_WAY',
+            'SIGN_IN_ANOTHER_WAY', // Prefer password option over email code
             'SIGN_IN_ANOTHER_WAY_EMAIL',
             'OTP_CODE_ENTRY',
             'USE_PASSWORD',
