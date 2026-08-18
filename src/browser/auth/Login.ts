@@ -68,13 +68,13 @@ export class Login {
         accountLocked: '#serviceAbuseLandingTitle',
         errorAlert: 'div[role="alert"]',
         passwordEntry: 'input#passwordEntry, [data-testid="passwordEntry"] input[type="password"], input[type="password"]',
-        emailEntry: 'input#usernameEntry, [data-testid="usernameEntry"] input[type="email"], input[type="email"]',
+        emailEntry: 'input#usernameEntry, [data-testid="usernameEntry"] input[type="email"]',
         kmsiVideo: '[data-testid="kmsiVideo"]',
         passKeyVideo: '[data-testid="biometricVideo"]',
         passKeyError: '[data-testid="registrationImg"]',
         passwordlessCheck: '[data-testid="deviceShieldCheckmarkVideo"]',
         passwordlessNumber: '[data-testid="displaySign"]',
-        totpInput: 'input[name="otc"]',
+        totpInput: 'input[name="otc"], input#iOttText, input#floatingLabelInput5, input#otc-confirmation-input',
         totpInputOld: 'form[name="OneTimeCodeViewForm"]',
         identityBanner: '[data-testid="identityBanner"]',
         otpCodeEntry: '[data-testid="codeEntry"]',
@@ -199,6 +199,19 @@ export class Login {
             return 'LOGGED_IN'
         }
 
+        // Microsoft can use the older account.live.com confirm-identity page for
+        // authenticator-code verification. Detect its TOTP field directly so
+        // ACCOUNT_n_TOTP_SECRET can be used without interactive input.
+        const microsoftTotpInput = page.locator(this.selectors.totpInput).first()
+        const hasMicrosoftTotpInput =
+            (await microsoftTotpInput.isVisible().catch(() => false)) ||
+            ((await microsoftTotpInput.count().catch(() => 0)) > 0)
+
+        if (hasMicrosoftTotpInput) {
+            this.bot.logger.debug(this.bot.isMobile, 'DETECT-STATE', 'Microsoft TOTP input detected via fallback')
+            return '2FA_TOTP'
+        }
+
         // Microsoft Fluent password page can be fully rendered while the
         // short visibility check still misses it. Detect the actual password
         // input directly as a fallback.
@@ -216,21 +229,22 @@ export class Login {
             return 'PASSWORD_INPUT'
         }
 
-        // Microsoft Fluent login sometimes renders the username field correctly
-        // while Patchright's short visibility check fails to recognize it.
-        // Detect the current username-entry markup directly as a fallback.
-        const microsoftUsernameInput = page.locator(this.selectors.emailEntry).first()
-        const hasMicrosoftUsernameInput =
-            (await microsoftUsernameInput.isVisible().catch(() => false)) ||
-            ((await microsoftUsernameInput.count().catch(() => 0)) > 0)
+        // Only treat Microsoft's actual username-entry controls as EMAIL_INPUT.
+        // account.live.com identity verification can contain unrelated email fields.
+        if (hostname === 'login.live.com') {
+            const microsoftUsernameInput = page.locator(this.selectors.emailEntry).first()
+            const hasMicrosoftUsernameInput =
+                (await microsoftUsernameInput.isVisible().catch(() => false)) ||
+                ((await microsoftUsernameInput.count().catch(() => 0)) > 0)
 
-        if (hasMicrosoftUsernameInput) {
-            this.bot.logger.debug(
-                this.bot.isMobile,
-                'DETECT-STATE',
-                'Microsoft username input detected via fallback'
-            )
-            return 'EMAIL_INPUT'
+            if (hasMicrosoftUsernameInput) {
+                this.bot.logger.debug(
+                    this.bot.isMobile,
+                    'DETECT-STATE',
+                    'Microsoft username input detected via fallback'
+                )
+                return 'EMAIL_INPUT'
+            }
         }
 
         const stateChecks: Array<[string, LoginState]> = [
@@ -333,7 +347,7 @@ export class Login {
             'EMAIL_VERIFICATION_INPUT',
             'RECOVERY_EMAIL_INPUT',
             'SIGN_IN_ANOTHER_WAY_PASSWORDLESS',
-            'SIGN_IN_ANOTHER_WAY', // Prefer password option over email code
+            'SIGN_IN_ANOTHER_WAY',
             'SIGN_IN_ANOTHER_WAY_EMAIL',
             'OTP_CODE_ENTRY',
             'USE_PASSWORD',
@@ -589,7 +603,6 @@ export class Login {
             }
 
             case 'SIGN_IN_ANOTHER_WAY_EMAIL': {
-                // The picker can finish rendering after state detection. Re-check before falling back to email.
                 const passwordlessOption = await this.findPasswordlessOption(page)
                 if (passwordlessOption) {
                     this.bot.logger.info(
@@ -826,7 +839,6 @@ export class Login {
             this.bot.logger.warn(this.bot.isMobile, 'LOGIN', 'Could not verify Rewards Dashboard, assuming login valid')
         }
 
-        // Dismiss at rewards dashboard
         await this.bot.browser.utils.tryDismissAllMessages(page).catch(() => {})
 
         this.bot.logger.info(this.bot.isMobile, 'LOGIN', 'Starting Bing session verification')
@@ -872,7 +884,6 @@ export class Login {
                         await this.bot.browser.utils.ghostClick(page, this.selectors.secondaryButton)
                     }
 
-                    // Handle stats in case of password etc
                     await this.handleState(state, page, account)
                 }
 
