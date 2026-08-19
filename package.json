@@ -31,13 +31,13 @@
         "Microsoft Rewards",
         "Bot",
         "Script",
-        "Playwright",
-        "Automation"
+        "Playwright"
     ],
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/ms": "^2.1.0",
         "@types/node": "^24.10.1",
+        "@types/semver": "^7.7.1",
         "eslint": "^10.4.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.6.0",
