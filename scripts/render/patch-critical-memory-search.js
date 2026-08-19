@@ -36,7 +36,7 @@ async function main() {
     )
 
     replaceOnce(
-        "        } finally {\n            await page.goto(URLs.bing.origin).catch(() => {})\n        }",
+        '        } finally {\n            await page.goto(URLs.bing.origin).catch(() => {})\n        }',
         `        } finally {\n            const memory = sampleProcessMemory()\n            const skipFinalNavigation =\n                this.memoryCritical ||\n                (memory.containerUsagePercent !== null &&\n                    memory.containerUsagePercent >= CONTAINER_ABORT_THRESHOLD_PERCENT)\n\n            if (skipFinalNavigation) {\n                this.bot.logger.warn(\n                    isMobile,\n                    'MEMORY',\n                    \`Skipping post-search Bing navigation so browser cleanup can run immediately | \${this.formatMemory(memory)}\`\n                )\n            } else if (!page.isClosed()) {\n                await page\n                    .goto(URLs.bing.origin, { waitUntil: 'domcontentloaded', timeout: 5000 })\n                    .catch(() => {})\n            }\n        }`,
         'post-search navigation'
     )
