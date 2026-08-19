@@ -10,7 +10,7 @@
     "scripts": {
         "pre-build": "npm i && rimraf dist && npx patchright install chromium",
         "install:browser": "npx patchright install chromium",
-        "build": "node ./scripts/render/patch-critical-memory-search.js && node ./scripts/render/patch-free-tier-memory.js && rimraf dist && tsc && node ./scripts/main/copyAssets.js",
+        "build": "node ./scripts/render/patch-critical-memory-search.js && node ./scripts/render/patch-free-tier-memory.js && node ./scripts/render/patch-final-mobile-memory.js && rimraf dist && tsc && node ./scripts/main/copyAssets.js",
         "start": "node ./dist/index.js",
         "ts-start": "ts-node ./src/index.ts",
         "dev": "ts-node ./src/index.ts -dev",
