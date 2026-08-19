@@ -10,7 +10,7 @@
     "scripts": {
         "pre-build": "npm i && rimraf dist && npx patchright install chromium",
         "install:browser": "npx patchright install chromium",
-        "build": "rimraf dist && tsc && node ./scripts/main/copyAssets.js",
+        "build": "node ./scripts/render/patch-critical-memory-search.js && rimraf dist && tsc && node ./scripts/main/copyAssets.js",
         "start": "node ./dist/index.js",
         "ts-start": "ts-node ./src/index.ts",
         "dev": "ts-node ./src/index.ts -dev",
@@ -31,14 +31,13 @@
         "Microsoft Rewards",
         "Bot",
         "Script",
-        "TypeScript",
-        "Playwright"
+        "Playwright",
+        "Automation"
     ],
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@types/ms": "^2.1.0",
         "@types/node": "^24.10.1",
-        "@types/semver": "^7.7.1",
         "eslint": "^10.4.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.6.0",
