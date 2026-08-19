@@ -121,6 +121,15 @@ export class Search extends BaseActivity {
             await page.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {})
             await this.bot.browser.utils.tryDismissAllMessages(page)
 
+            if (await this.handleMemoryPressure(page, isMobile)) {
+                this.bot.logger.warn(
+                    isMobile,
+                    tracker.context,
+                    `Skipping Bing search UI recovery because container memory is already critical | ${tracker.progress()}`
+                )
+                return stats
+            }
+
             if (!(await this.ensureSearchReady(page, isMobile))) {
                 this.bot.logger.warn(
                     isMobile,
@@ -358,11 +367,7 @@ export class Search extends BaseActivity {
         await this.bot.browser.utils.tryDismissAllMessages(page)
 
         const after = sampleProcessMemory()
-        this.bot.logger.info(
-            isMobile,
-            'MEMORY',
-            `Bing page recycled | reason=${reason} | ${this.formatMemory(after)}`
-        )
+        this.bot.logger.info(isMobile, 'MEMORY', `Bing page recycled | reason=${reason} | ${this.formatMemory(after)}`)
     }
 
     private formatMemory(memory: ProcessMemorySnapshot): string {
